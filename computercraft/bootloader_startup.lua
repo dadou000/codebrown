@@ -23,23 +23,25 @@ end
 
 local SOURCE_BASE_URL = "https://raw.githubusercontent.com/dadou000/codebrown/main/computercraft"
 local CDN_SOURCE_BASE_URL = "https://cdn.jsdelivr.net/gh/dadou000/codebrown@main/computercraft"
+local API_SOURCE_BASE_URL = "https://api.github.com/repos/dadou000/codebrown/contents/computercraft"
 local BOOTLOADER_URLS = {
   SOURCE_BASE_URL .. "/bootloader_startup.lua",
   CDN_SOURCE_BASE_URL .. "/bootloader_startup.lua",
+  API_SOURCE_BASE_URL .. "/bootloader_startup.lua?ref=main",
 }
 
 local PROGRAM_URLS = {
-  maincomputer = { SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua" },
-  admin_control_panel = { SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua" },
-  emergency_controls_screen = { SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua" },
-  action_screen = { SOURCE_BASE_URL .. "/programs/action_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/action_screen/startup.lua" },
-  alert_level_screen = { SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua" },
-  clock = { SOURCE_BASE_URL .. "/programs/clock/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/clock/startup.lua" },
-  mon = { SOURCE_BASE_URL .. "/programs/mon/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/mon/startup.lua" },
-  statsm = { SOURCE_BASE_URL .. "/programs/statsm/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/statsm/startup.lua" },
-  presentation_screen = { SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua" },
-  PMC = { SOURCE_BASE_URL .. "/programs/PMC/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/PMC/startup.lua" },
-  peripheral = { SOURCE_BASE_URL .. "/programs/peripheral/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/peripheral/startup.lua" },
+  maincomputer = { SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua", API_SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua?ref=main" },
+  admin_control_panel = { SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua", API_SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua?ref=main" },
+  emergency_controls_screen = { SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua", API_SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua?ref=main" },
+  action_screen = { SOURCE_BASE_URL .. "/programs/action_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/action_screen/startup.lua", API_SOURCE_BASE_URL .. "/programs/action_screen/startup.lua?ref=main" },
+  alert_level_screen = { SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua", API_SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua?ref=main" },
+  clock = { SOURCE_BASE_URL .. "/programs/clock/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/clock/startup.lua", API_SOURCE_BASE_URL .. "/programs/clock/startup.lua?ref=main" },
+  mon = { SOURCE_BASE_URL .. "/programs/mon/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/mon/startup.lua", API_SOURCE_BASE_URL .. "/programs/mon/startup.lua?ref=main" },
+  statsm = { SOURCE_BASE_URL .. "/programs/statsm/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/statsm/startup.lua", API_SOURCE_BASE_URL .. "/programs/statsm/startup.lua?ref=main" },
+  presentation_screen = { SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua", API_SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua?ref=main" },
+  PMC = { SOURCE_BASE_URL .. "/programs/PMC/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/PMC/startup.lua", API_SOURCE_BASE_URL .. "/programs/PMC/startup.lua?ref=main" },
+  peripheral = { SOURCE_BASE_URL .. "/programs/peripheral/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/peripheral/startup.lua", API_SOURCE_BASE_URL .. "/programs/peripheral/startup.lua?ref=main" },
 }
 
 local programTypes = {
@@ -452,7 +454,7 @@ function downloadUrlTo(url, path)
   if fs.exists(path) then fs.delete(path) end
   local ok = false
   if http and http.get then
-    local headers = { ["User-Agent"] = "MCCR-ComputerCraft/1.0", ["Accept"] = "text/plain, application/octet-stream" }
+    local headers = { ["User-Agent"] = "MCCR-ComputerCraft/1.0", ["Accept"] = "application/vnd.github.raw, text/plain, application/octet-stream" }
     local httpOk, response, err, failResponse = pcall(http.get, { url = url, headers = headers, redirect = true, timeout = 20 })
     if (not httpOk or not response) and http and http.get then
       httpOk, response, err, failResponse = pcall(http.get, url, headers)
