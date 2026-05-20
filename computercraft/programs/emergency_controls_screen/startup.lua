@@ -603,7 +603,6 @@ local function mccrValidBootloaderText(text)
     and text:find("MCCR mapped GitHub bootloader", 1, true)
     and text:find("local PROGRAM_URLS = {", 1, true)
     and text:find("function chooseMapping", 1, true)
-    and not text:find("Too Many Requests", 1, true)
     and not text:find("<html", 1, true)
 end
 
