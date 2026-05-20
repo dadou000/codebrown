@@ -22,20 +22,24 @@ if os.epoch then
 end
 
 local SOURCE_BASE_URL = "https://raw.githubusercontent.com/dadou000/codebrown/main/computercraft"
-local BOOTLOADER_URL = SOURCE_BASE_URL .. "/bootloader_startup.lua"
+local CDN_SOURCE_BASE_URL = "https://cdn.jsdelivr.net/gh/dadou000/codebrown@main/computercraft"
+local BOOTLOADER_URLS = {
+  SOURCE_BASE_URL .. "/bootloader_startup.lua",
+  CDN_SOURCE_BASE_URL .. "/bootloader_startup.lua",
+}
 
 local PROGRAM_URLS = {
-  maincomputer = SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua",
-  admin_control_panel = SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua",
-  emergency_controls_screen = SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua",
-  action_screen = SOURCE_BASE_URL .. "/programs/action_screen/startup.lua",
-  alert_level_screen = SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua",
-  clock = SOURCE_BASE_URL .. "/programs/clock/startup.lua",
-  mon = SOURCE_BASE_URL .. "/programs/mon/startup.lua",
-  statsm = SOURCE_BASE_URL .. "/programs/statsm/startup.lua",
-  presentation_screen = SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua",
-  PMC = SOURCE_BASE_URL .. "/programs/PMC/startup.lua",
-  peripheral = SOURCE_BASE_URL .. "/programs/peripheral/startup.lua",
+  maincomputer = { SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/maincomputer/startup.lua" },
+  admin_control_panel = { SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/admin_control_panel/startup.lua" },
+  emergency_controls_screen = { SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/emergency_controls_screen/startup.lua" },
+  action_screen = { SOURCE_BASE_URL .. "/programs/action_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/action_screen/startup.lua" },
+  alert_level_screen = { SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/alert_level_screen/startup.lua" },
+  clock = { SOURCE_BASE_URL .. "/programs/clock/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/clock/startup.lua" },
+  mon = { SOURCE_BASE_URL .. "/programs/mon/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/mon/startup.lua" },
+  statsm = { SOURCE_BASE_URL .. "/programs/statsm/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/statsm/startup.lua" },
+  presentation_screen = { SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/presentation_screen/startup.lua" },
+  PMC = { SOURCE_BASE_URL .. "/programs/PMC/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/PMC/startup.lua" },
+  peripheral = { SOURCE_BASE_URL .. "/programs/peripheral/startup.lua", CDN_SOURCE_BASE_URL .. "/programs/peripheral/startup.lua" },
 }
 
 local programTypes = {
@@ -367,10 +371,17 @@ function chooseMapping(cfg)
   return program, instance
 end
 
-function urlFor(program)
-  local url = PROGRAM_URLS[program.key]
-  if url and url ~= "" then return url end
+function urlsFor(program)
+  local urls = PROGRAM_URLS[program.key]
+  if type(urls) == "string" then urls = { urls } end
+  if type(urls) == "table" and #urls > 0 then return urls end
   error("missing GitHub raw URL in bootloader PROGRAM_URLS for " .. program.key, 0)
+end
+
+function firstBytes(text)
+  text = tostring(text or ""):gsub("[\r\n\t]+", " ")
+  if #text > 96 then return text:sub(1, 96) .. "..." end
+  return text
 end
 
 function verifyProgram(program, instance, path)
@@ -382,7 +393,7 @@ function verifyProgram(program, instance, path)
 
   if text:find("<!DOCTYPE", 1, true) or text:find("<html", 1, true) then
     fs.delete(path)
-    error("downloaded a web page, not raw Lua; check GitHub raw URL", 0)
+    error("downloaded a web page, not raw Lua: " .. firstBytes(text), 0)
   end
 
   local expectedProgram = 'local MCCR_PROGRAM = "' .. program.key .. '"'
@@ -411,7 +422,7 @@ function verifyBootloader(path)
 
   if text:find("<!DOCTYPE", 1, true) or text:find("<html", 1, true) then
     fs.delete(path)
-    error("downloaded a web page, not raw Lua; check bootloader GitHub raw URL", 0)
+    error("downloaded a web page, not raw Lua: " .. firstBytes(text), 0)
   end
 
   if not text:find("MCCR mapped GitHub bootloader", 1, true) then
@@ -436,7 +447,12 @@ function downloadUrlTo(url, path)
   if fs.exists(path) then fs.delete(path) end
   local ok = false
   if http and http.get then
-    local httpOk, response = pcall(http.get, url)
+    local headers = { ["User-Agent"] = "MCCR-ComputerCraft/1.0", ["Accept"] = "text/plain, application/octet-stream" }
+    local httpOk, response, err, failResponse = pcall(http.get, { url = url, headers = headers, redirect = true, timeout = 20 })
+    if (not httpOk or not response) and http and http.get then
+      httpOk, response, err, failResponse = pcall(http.get, url, headers)
+    end
+    if not response and failResponse then response = failResponse end
     if not httpOk then response = nil end
     if response then
       local code, message = 200, "OK"
@@ -457,11 +473,24 @@ function downloadUrlTo(url, path)
         end
         pcall(response.close)
       end
+    elseif err then
+      error("download failed: " .. tostring(err), 0)
     end
   end
   if not ok or not fs.exists(path) then
     error("download failed; check GitHub raw URL and HTTP access", 0)
   end
+end
+
+function downloadFirstUrlTo(urls, path)
+  local lastErr = nil
+  for _, url in ipairs(urls or {}) do
+    local ok, err = pcall(downloadUrlTo, url, path)
+    if ok then return url end
+    lastErr = err
+    if fs.exists(path) then fs.delete(path) end
+  end
+  error(lastErr or "all download sources failed", 0)
 end
 
 function writeText(path, text)
@@ -526,16 +555,17 @@ function requestBootloaderPayload(url, path, program, instance)
 end
 
 function downloadProgramOnce(program, instance, attempt)
-  local url = urlFor(program)
+  local urls = urlsFor(program)
   if fs.exists(PROGRAM_TMP) then fs.delete(PROGRAM_TMP) end
   clear()
   drawBootUpdate("FIRMWARE", "download attempt " .. tostring(attempt or 1), program, instance)
   broadcastUpdateStatus(program, instance, "downloading", "attempt " .. tostring(attempt or 1), 25)
   print("Downloading MCCR " .. program.key .. " program...")
   print("Instance: " .. instance.name)
-  print("Source: " .. tostring(url))
+  print("Sources: " .. tostring(#urls))
 
-  downloadUrlTo(url, PROGRAM_TMP)
+  local usedUrl = downloadFirstUrlTo(urls, PROGRAM_TMP)
+  print("Used: " .. tostring(usedUrl))
   drawBootUpdate("FIRMWARE", "verifying", program, instance)
   verifyProgram(program, instance, PROGRAM_TMP)
   broadcastUpdateStatus(program, instance, "verifying", "ok", 85)
@@ -545,8 +575,13 @@ function downloadProgramOnce(program, instance, attempt)
 end
 
 function bootloaderUrl()
-  if BOOTLOADER_URL and BOOTLOADER_URL ~= "" then return BOOTLOADER_URL end
-  error("missing BOOTLOADER_URL in /startup.lua", 0)
+  if type(BOOTLOADER_URLS) == "table" and #BOOTLOADER_URLS > 0 then return BOOTLOADER_URLS[1] end
+  error("missing BOOTLOADER_URLS in /startup.lua", 0)
+end
+
+function bootloaderUrls()
+  if type(BOOTLOADER_URLS) == "table" and #BOOTLOADER_URLS > 0 then return BOOTLOADER_URLS end
+  error("missing BOOTLOADER_URLS in /startup.lua", 0)
 end
 
 function replaceBootloader()
@@ -562,7 +597,8 @@ function replaceBootloader()
 end
 
 function downloadBootloaderOnce(program, instance, attempt)
-  local url = bootloaderUrl()
+  local urls = bootloaderUrls()
+  local url = urls[1]
   clear()
   drawBootUpdate("BOOTLOADER", "download attempt " .. tostring(attempt or 1), program, instance)
   broadcastUpdateStatus(program, instance, "bootloader", "attempt " .. tostring(attempt or 1), 25)
@@ -580,10 +616,12 @@ function downloadBootloaderOnce(program, instance, attempt)
     else
       print("LAN cache unavailable: " .. tostring(lanErr))
       print("Falling back to GitHub...")
-      downloadUrlTo(url, STARTUP_TMP)
+      local usedUrl = downloadFirstUrlTo(urls, STARTUP_TMP)
+      print("Used: " .. tostring(usedUrl))
     end
   else
-    downloadUrlTo(url, STARTUP_TMP)
+    local usedUrl = downloadFirstUrlTo(urls, STARTUP_TMP)
+    print("Used: " .. tostring(usedUrl))
   end
   drawBootUpdate("BOOTLOADER", "verifying", program, instance)
   verifyBootloader(STARTUP_TMP)
