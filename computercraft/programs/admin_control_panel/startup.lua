@@ -387,11 +387,6 @@ function verifyProgram(program, instance, path)
   local text = h.readAll()
   h.close()
 
-  if text:find("Too Many Requests", 1, true) or text:find("rate limit", 1, true) then
-    fs.delete(path)
-    error("download source rate limited this computer; retry later", 0)
-  end
-
   if text:find("<!DOCTYPE", 1, true) or text:find("<html", 1, true) then
     fs.delete(path)
     error("downloaded a web page, not raw Lua; check GitHub raw URL", 0)
@@ -420,11 +415,6 @@ function verifyBootloader(path)
   if not h then error("downloaded bootloader could not be opened", 0) end
   local text = h.readAll()
   h.close()
-
-  if text:find("Too Many Requests", 1, true) or text:find("rate limit", 1, true) then
-    fs.delete(path)
-    error("download source rate limited this computer; retry later", 0)
-  end
 
   if text:find("<!DOCTYPE", 1, true) or text:find("<html", 1, true) then
     fs.delete(path)
@@ -456,14 +446,24 @@ function downloadUrlTo(url, path)
     local httpOk, response = pcall(http.get, url)
     if not httpOk then response = nil end
     if response then
-      local h = fs.open(path, "w")
-      if h then
-        local readOk, body = pcall(response.readAll)
-        if readOk then h.write(body or "") end
-        h.close()
-        ok = readOk
+      local code, message = 200, "OK"
+      if type(response.getResponseCode) == "function" then
+        local codeOk, c, m = pcall(response.getResponseCode)
+        if codeOk and c then code, message = c, m or message end
       end
-      pcall(response.close)
+      if code < 200 or code >= 300 then
+        pcall(response.close)
+        error("download failed: HTTP " .. tostring(code) .. " " .. tostring(message), 0)
+      else
+        local h = fs.open(path, "w")
+        if h then
+          local readOk, body = pcall(response.readAll)
+          if readOk then h.write(body or "") end
+          h.close()
+          ok = readOk
+        end
+        pcall(response.close)
+      end
     end
   end
   if not ok or not fs.exists(path) then
