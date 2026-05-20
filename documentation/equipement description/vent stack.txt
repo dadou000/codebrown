@@ -1,0 +1,1 @@
+the vent stack is what we will use to  draw air deep undergrounnd and exaust it back at surface ,all system heat is exausted trough here apart from the reactors , simulate room temperature correctly , from the image try to imagine how much M3 is the room knowing 1 block is 1M3 ,

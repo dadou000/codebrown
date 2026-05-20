@@ -1,0 +1,1 @@
+periphericals computers are the computers that will external connect devices to the control room such as the draconic energy core , the extended AE 2 ecosystem ,mekanism fiscion reactor and its turbine via a wired modem, mekanism fusion reactor etc , they should discover device automatically and determine the type of device they are connected to

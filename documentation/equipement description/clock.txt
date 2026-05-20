@@ -1,0 +1,1 @@
+the clock will display the Minecraft time and days, and global utc clock and a local utc+2 clock ,it will show the temperature of the room too ,nominal power 30W , voltage range 16v down to 5v very dim bellow 6v flicker bellow 5v and shuts down at 4.6v , temperature range -40c to 89c , freeze above 84c and shutsdown above 90c, , Minecraft screen size=3 block Width,1block Height.

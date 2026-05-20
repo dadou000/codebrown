@@ -1,0 +1,618 @@
+Full description of the plant network
+
+This is a combined electrical + emergency power + HVAC/ventilation + lighting network for the whole facility.
+
+The central rule is:
+
+The plant has one tied 400VAC/230VAC 3-phase + neutral feeder leaving the low-voltage transformer section.
+The 400VAC and 230VAC are the same system: 400V phase-to-phase, 230V phase-to-neutral.
+
+1. Main power architecture
+High-level flow
+Power plants
+  ↓
+Plant transformers / converters
+  ↓
+1MVDCSPC main DC backbone
+  ↓
+Draconic super capacitor buffer
+  ↓
+Two 1MVDC → 10kVAC transformer/converter sections
+  ↓
+10KVAC_A and 10KVAC_B redundant 3φ 60Hz buses
+  ↓
+Two 10kVAC → 400VAC/230VAC LV transformers
+  ↓
+Immediate LV tie point after transformers
+  ↓
+Single 400VAC/230VAC 3φ+N 60Hz feeder
+  ↓
+Control room / building / HVAC / lighting / charger loads
+2. Generation network
+
+The plant supports 8 power plant inputs.
+
+Currently active:
+
+Slot	Source	Status
+1	Mekanism Nuclear Power Plant	Active
+2	Mekanism Fusion Power Plant	Active
+3	Reserved plant input	Empty
+4	Reserved plant input	Empty
+5	Reserved plant input	Empty
+6	Reserved plant input	Empty
+7	Reserved plant input	Empty
+8	Reserved plant input	Empty
+
+Each plant input has:
+
+Power Plant → Plant Transformer → Breaker → 1MVDCSPC
+
+So every source can be isolated independently.
+
+3. 1MVDCSPC DC backbone
+
+The central DC bus is:
+
+1MVDCSPC
+
+It acts as the main 1 megavolt DC collector.
+
+It receives all plant transformer outputs and feeds:
+
+the Draconic Super Capacitor
+the T10-A 1MVDC → 10KVAC_A transformer/converter
+the T10-B 1MVDC → 10KVAC_B transformer/converter
+1MVDCSPC components
+Component	Function
+1MVDCSPC main DC bus	Collects high-voltage DC power
+Plant input breakers	Isolate individual generation sources
+DC tie / isolation point	Allows section isolation
+Super capacitor breaker	Connects/disconnects the Draconic buffer
+T10-A feeder breaker	Feeds 10KVAC_A converter
+T10-B feeder breaker	Feeds 10KVAC_B converter
+4. Draconic super capacitor
+
+The Draconic Super Capacitor is connected directly to the 1MVDCSPC bus through a breaker.
+
+Purpose:
+
+transient smoothing
+short-term ride-through
+plant startup support
+load spike absorption
+DC bus stabilization
+emergency buffer during switching events
+
+Connection:
+
+1MVDCSPC → Breaker → Draconic Super Capacitor
+5. 10kVAC network
+
+The 1MVDCSPC feeds two large 10kVAC transformer/converter sections.
+
+Transformer/converter	Input	Output	Rating
+T10-A	1MVDCSPC	10KVAC_A 3φ 60Hz	5000 kVA
+T10-B	1MVDCSPC	10KVAC_B 3φ 60Hz	5000 kVA
+
+Total installed 10kVAC conversion capacity:
+
+5000 kVA + 5000 kVA = 10,000 kVA
+
+At power factor 1.0:
+
+10,000 kVA ≈ 10 MW
+10kVAC redundancy
+
+There are two named 10kVAC lines:
+
+10KVAC_A
+10KVAC_B
+
+Both are:
+
+3-phase AC, 60Hz
+
+Each side has breakers, and the two sides have a bus tie.
+
+Conceptual topology:
+
+1MVDCSPC
+   ├── T10-A 5000 kVA → 10KVAC_A ── Breakers ┐
+   │                                          ├── 10kVAC bus tie
+   └── T10-B 5000 kVA → 10KVAC_B ── Breakers ┘
+
+Normal state:
+
+10KVAC_A feeds LV-A
+10KVAC_B feeds LV-B
+10kVAC tie normally open or standby
+
+Fault/maintenance state:
+
+One 10kVAC side can be isolated.
+The other side can support the downstream system if capacity allows.
+6. Low-voltage transformer network
+
+The 10kVAC system feeds two low-voltage transformers.
+
+Transformer	Input	Output	Capacity
+LV-A	10KVAC_A	400VAC/230VAC 3φ+N 60Hz	2 MW
+LV-B	10KVAC_B	400VAC/230VAC 3φ+N 60Hz	2 MW
+
+Total LV transformation capacity:
+
+2 MW + 2 MW = 4 MW
+Critical topology rule
+
+There is only one 3-phase line leaving the LV transformer section.
+
+The two LV transformer outputs are tied immediately after the transformers.
+
+Correct topology:
+
+LV-A output ── Breaker ┐
+                       ├── LV tie point / common bus
+LV-B output ── Breaker ┘
+                          ↓
+              One 400VAC/230VAC 3φ+N feeder
+
+So the schematic should not show separate outgoing 400V and 230V lines.
+
+It should show:
+
+single 400VAC/230VAC 3φ+N 60Hz feeder
+7. 400VAC/230VAC network
+
+The LV feeder is one combined system:
+
+400VAC/230VAC 3φ+N 60Hz
+
+Meaning:
+
+L1-L2 = 400VAC
+L2-L3 = 400VAC
+L3-L1 = 400VAC
+
+L1-N = 230VAC
+L2-N = 230VAC
+L3-N = 230VAC
+
+The feeder carries:
+
+L1
+L2
+L3
+Neutral
+Protective earth / ground, if represented
+
+This single feeder supplies:
+
+control room panel
+230V equipment branches
+400V/3-phase loads if needed
+400V emergency battery charger
+facility HVAC
+transformer cooling fans
+lighting circuits
+12V battery AC chargers
+8. Emergency 400V battery network
+
+The plant has a high-power emergency battery system.
+
+Item	Value
+Battery voltage class	400VDC
+Nominal capacity	500 kWh
+Maximum rated output	1 MW
+Emergency AC output	400VAC/230VAC 3φ+N 60Hz
+Normal charge path
+400VAC/230VAC feeder
+  ↓
+400V battery charger
+  ↓
+Emergency 400V battery bank
+Emergency backfeed path
+Emergency 400V battery bank
+  ↓
+3-phase inverter
+  ↓
+400VAC/230VAC 3φ+N 60Hz
+  ↓
+Common LV feeder / control room / critical loads
+
+At full rated output:
+
+500 kWh / 1000 kW = 0.5 h
+
+So approximate full-load runtime:
+
+30 minutes at 1 MW
+
+Approximate runtime table:
+
+Load	Runtime
+1 MW	0.5 h
+500 kW	1 h
+250 kW	2 h
+100 kW	5 h
+50 kW	10 h
+9. 400VDC-to-12V buck converter network
+
+The emergency 400V battery BMS provides a protected 400VDC output.
+
+This output feeds one buck converter.
+
+400V emergency battery
+  ↓
+BMS protected 400VDC output
+  ↓
+400VDC → 12V buck converter
+  ↓
+12V emergency bus
+Buck converter rating
+Parameter	Value
+Input	400VDC from BMS
+Output	12VDC emergency bus
+Sustained output	1 kW
+Startup / inrush output	3 kW
+
+At 12V:
+
+1 kW / 12V ≈ 83 A continuous
+3 kW / 12V ≈ 250 A startup/surge
+
+Important correction:
+
+The 400VDC-to-12V buck does not charge the 12V batteries.
+It only powers the 12V emergency bus.
+
+10. 12V battery charging network
+
+There are three 12V emergency batteries.
+
+Battery	Capacity	Dedicated role
+12V Battery 1	500 Wh	PMC1 emergency
+12V Battery 2	500 Wh	PMC2 emergency
+12V Battery 3	500 Wh	PMC3 emergency
+
+Total 12V stored energy:
+
+500 Wh × 3 = 1500 Wh = 1.5 kWh
+Correct charging method
+
+Each 12V battery has its own 230VAC charger.
+
+The chargers are distributed on different phases of the single 400VAC/230VAC feeder:
+
+L1-N → 230VAC charger → 12V Battery 1
+L2-N → 230VAC charger → 12V Battery 2
+L3-N → 230VAC charger → 12V Battery 3
+How the 400V battery can charge them
+
+The 400V battery does not charge the 12V batteries through the buck.
+
+Instead, it charges them indirectly by energizing the AC bus:
+
+400V emergency battery
+  ↓
+3φ inverter
+  ↓
+400VAC/230VAC 3φ+N bus
+  ↓
+three 230VAC battery chargers
+  ↓
+three 12V batteries
+11. 12V emergency bus network
+
+The 12V emergency bus can be powered by:
+
+400V battery BMS → 400VDC-to-12V buck converter → 12V emergency bus
+
+It supports:
+
+PMC emergency circuits
+selected control-room displays
+emergency controls screen
+main PC backup input
+Mon1 to Mon4 backup inputs
+StatsM1 and StatsM2 backup inputs
+clock
+action screen
+other critical low-voltage control devices
+
+The buck converter can provide:
+
+1 kW continuous
+3 kW startup/inrush
+
+So the 12V emergency bus should be treated as a high-current bus.
+
+Recommended protection concept:
+
+12V emergency bus
+  ├── fuse/breaker → PMC1 branch
+  ├── fuse/breaker → PMC2 branch
+  ├── fuse/breaker → PMC3 branch
+  ├── fuse/breaker → main PC backup input
+  ├── fuse/breaker → monitor/display backup branch
+  └── fuse/breaker → control/clock/action branch
+12. Control room electrical network
+
+The control room receives the single tied LV feeder:
+
+400VAC/230VAC 3φ+N 60Hz
+
+Inside the control room, loads are mostly 230VAC phase-neutral:
+
+L1-N
+L2-N
+L3-N
+AC-only equipment
+Equipment	Supply
+Main Presentation Screen	230VAC phase-neutral
+Presentation Screen Left	230VAC phase-neutral
+Presentation Screen Right	230VAC phase-neutral
+StatsM3	230VAC phase-neutral
+StatsM4	230VAC phase-neutral
+StatsM5	230VAC phase-neutral
+StatsM6	230VAC phase-neutral
+Alert Level Screen	230VAC phase-neutral
+Dual-supply equipment
+Equipment	Normal supply	Backup supply
+Main PC	230VAC	12V emergency bus
+Emergency Controls Screen	230VAC	12V emergency bus
+Clock	230VAC	12V emergency bus
+Action Screen	230VAC	12V emergency bus
+Mon1	230VAC	12V emergency bus
+Mon2	230VAC	12V emergency bus
+Mon3	230VAC	12V emergency bus
+Mon4	230VAC	12V emergency bus
+StatsM1	230VAC	12V emergency bus
+StatsM2	230VAC	12V emergency bus
+PMC units
+PMC	Normal supply	Emergency supply
+PMC1	230VAC	12V Battery 1 / 12V emergency branch
+PMC2	230VAC	12V Battery 2 / 12V emergency branch
+PMC3	230VAC	12V Battery 3 / 12V emergency branch
+13. Ventilation network
+
+The ventilation system includes transformer cooling and control-room exhaust.
+
+Transformer ventilation
+
+Each transformer section has VFD cooling fans.
+
+Rule:
+
+All transformer sections: 2 VFD fans
+1MVDC → 10kVAC transformer/converter section: 4 VFD fans
+Cooling fan allocation
+Section	Fan count
+Plant transformer section	2 VFD fans
+1MVDCSPC / DC collector section, if enclosed	2 VFD fans
+1MVDC → 10kVAC transformer/converter section	4 VFD fans
+10kVAC → 400VAC/230VAC LV transformer section	2 VFD fans
+Emergency charger / inverter bay, if represented	2 VFD fans recommended
+
+The VFD fans are powered from the main:
+
+400VAC/230VAC 3φ+N feeder
+
+Small fans may use 230VAC branches. Larger VFD groups may use 400VAC 3-phase.
+
+14. Control-room exhaust network
+
+The control room has two exhaust fans:
+
+Exhaust fan	Function
+Main computer exhaust fan	Extracts heat from the main computer enclosure/rack
+Screen exhaust fan	Extracts heat from the display/screen area
+
+Important thermal correction:
+
+These fans dump heat into the closed control room.
+They do not remove heat from the building.
+
+Thermal path:
+
+Main PC heat → computer exhaust fan → control room air
+Screen heat → screen exhaust fan → control room air
+Control room air → control room AC
+
+So these are internal heat-transfer fans, not true building exhaust.
+
+15. AC / HVAC network
+Control room AC
+
+Because the control room is closed and all equipment heat is dumped into it, it has its own AC unit.
+
+It removes heat from:
+
+main PC
+presentation screens
+monitors
+stats screens
+emergency controls
+lighting
+people
+exhaust fan heat
+general electronics
+
+Control-room thermal network:
+
+Control room equipment
+  ↓
+exhaust fans dump heat into room air
+  ↓
+control room AC removes heat
+Facility AC
+
+The facility has:
+
+2 huge AC units
+
+These are general facility cooling units.
+
+They serve:
+
+main hall
+protected complex
+hallway areas
+reunion room
+security room / hallway
+general building heat
+possibly transformer-area ambient support, if ducted
+
+Recommended electrical classification:
+
+Facility AC Unit 1 → likely 400VAC 3-phase
+Facility AC Unit 2 → likely 400VAC 3-phase
+Control Room AC → 230VAC or 400VAC depending size
+
+For schematic purposes, they are loads from:
+
+single 400VAC/230VAC 3φ+N feeder
+16. Lighting network
+
+All lights are neon lights powered from 230VAC phase-neutral branches.
+
+Full lighting list
+Area	Neon lights
+Control room	9
+Main hall	15
+Hallway	5
+Protected complex	30
+Reunion room	9
+Security room	8
+Security hallway	5
+Total	81
+
+So:
+
+Total neon lights = 81
+Suggested phase balancing
+Area	Total	L1-N	L2-N	L3-N
+Control room	9	3	3	3
+Main hall	15	5	5	5
+Hallway	5	2	2	1
+Protected complex	30	10	10	10
+Reunion room	9	3	3	3
+Security room	8	3	3	2
+Security hallway	5	2	2	1
+Total per phase	81	28	28	25
+
+Lighting topology:
+
+400VAC/230VAC 3φ+N feeder
+  ├── L1-N lighting branches
+  ├── L2-N lighting branches
+  └── L3-N lighting branches
+17. Full combined network tree
+1. Generation
+   ├── Mekanism Nuclear Plant
+   ├── Mekanism Fusion Plant
+   └── Reserved plant inputs 3–8
+        ↓
+2. Plant transformers / breakers
+        ↓
+3. 1MVDCSPC main DC bus
+   ├── Draconic Super Capacitor
+   ├── T10-A 5000 kVA converter
+   └── T10-B 5000 kVA converter
+        ↓
+4. 10kVAC redundant AC network
+   ├── 10KVAC_A 3φ 60Hz
+   ├── 10KVAC_B 3φ 60Hz
+   └── 10kVAC bus tie
+        ↓
+5. Low-voltage transformation
+   ├── LV-A 2MW transformer
+   ├── LV-B 2MW transformer
+   └── immediate LV tie point
+        ↓
+6. Single 400VAC/230VAC 3φ+N 60Hz feeder
+   ├── Control room electrical panel
+   ├── 400V emergency battery charger
+   ├── Facility HVAC
+   ├── Transformer VFD fans
+   ├── Lighting circuits
+   └── 12V battery 230VAC chargers
+        ↓
+7. Emergency systems
+   ├── 400V battery bank, 500kWh / 1MW
+   ├── 3φ inverter back to 400VAC/230VAC
+   ├── BMS protected 400VDC output
+   └── 400VDC→12V buck converter, 1kW sustained / 3kW startup
+        ↓
+8. 12V emergency bus
+   ├── PMC1 / PMC2 / PMC3 emergency branches
+   ├── main PC backup
+   ├── emergency controls screen
+   ├── Mon1–Mon4
+   ├── StatsM1–StatsM2
+   ├── clock
+   └── action screen
+18. Full operational modes
+Normal operation
+Power plants
+→ 1MVDCSPC
+→ 10kVAC A/B
+→ LV-A/LV-B
+→ tied 400VAC/230VAC feeder
+→ all normal loads
+
+During this mode:
+
+400V emergency battery charges
+12V batteries charge from their 230VAC chargers
+HVAC runs normally
+lighting runs normally
+control room uses normal AC
+12V emergency bus is on standby or supported as needed
+One plant offline
+Remaining generation
+→ 1MVDCSPC
+→ downstream AC system
+
+The Draconic super capacitor helps stabilize the bus during transition.
+
+One 10kVAC side offline
+Remaining 10kVAC side
+→ bus tie if needed
+→ LV transformer system
+
+Load may need to be reduced depending on available capacity.
+
+One LV transformer offline
+Remaining LV transformer
+→ LV tie point
+→ single 400VAC/230VAC feeder
+
+Capacity reduces from:
+
+4 MW → 2 MW
+
+but the control room still sees the same feeder type.
+
+Main generation failure
+400V emergency battery
+→ 3φ inverter
+→ 400VAC/230VAC bus
+→ critical AC loads and 230VAC battery chargers
+
+Also:
+
+400V battery BMS
+→ 400VDC-to-12V buck
+→ 12V emergency bus
+→ critical 12V loads
+
+The 12V batteries can still be charged indirectly because the inverter powers the 400VAC/230VAC bus, which feeds their individual 230VAC chargers.
+
+19. Final concise description
+
+The facility network is a high-power industrial plant system with two active Mekanism generation sources and six reserved plant inputs feeding a 1MVDCSPC backbone, buffered by a Draconic super capacitor. The 1MVDC bus feeds two 5000 kVA 10kVAC 3-phase 60Hz conversion lines, 10KVAC_A and 10KVAC_B, with breakers and a bus tie. These supply two 2 MW LV transformers whose outputs are tied immediately after the transformers, producing one single 400VAC/230VAC 3-phase + neutral 60Hz feeder for the entire control room and facility network.
+
+The plant has a 500 kWh / 1 MW emergency 400V battery bank that charges from the LV feeder and can backfeed the same feeder through a 3-phase inverter. Its BMS also feeds a 400VDC-to-12V buck converter rated 1 kW sustained and 3 kW startup, powering the 12V emergency bus only. The three 12V emergency batteries are not charged by the buck; each has its own 230VAC charger on a different phase, and the 400V battery can charge them indirectly by powering the 400VAC/230VAC bus through its inverter.
+
+The facility also includes transformer VFD cooling fans, control-room internal exhaust fans, a dedicated control-room AC unit, two large facility AC units, and 81 total neon lights distributed across control room, main hall, hallway, protected complex, reunion room, security room, and security hallway.

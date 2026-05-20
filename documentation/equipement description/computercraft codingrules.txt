@@ -1,0 +1,1 @@
+every single computer must be coded in a way that makes them save even after a chunk unload and reload scenario ,and keep running no matter what

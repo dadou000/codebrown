@@ -1,0 +1,10 @@
+white =without gravity , absolutely non important 
+light blue =information made by computer 
+green= nominal /good range 
+yellow =off nominal but might be a false positive
+orange =requires attention without being a major issue .
+red= requires immediate attention .
+purple=beyond control capacity 
+black =destroyed 
+
+flashing color means the indication is trending towards an elevation

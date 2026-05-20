@@ -1,0 +1,2 @@
+main computer fan =70w 100% speed 4216rpm
+all vfd fans for transformers = 10kw max 

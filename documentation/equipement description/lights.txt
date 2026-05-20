@@ -1,0 +1,1 @@
+each lamp consumes around 32w and will spike at nearly 130w at startup 

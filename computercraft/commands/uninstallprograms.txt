@@ -1,0 +1,1 @@
+delete mccr_boot.dat delete mccr_device.dat delete startup.lua delete mccr_program.lua delete mccr_boot_crash.log delete mccr_state delete maincomputer delete terminal 

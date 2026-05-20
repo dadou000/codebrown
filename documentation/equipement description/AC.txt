@@ -1,0 +1,2 @@
+aircond control room = 5000w capacity find an accurate draw for that , 
+aircond facility = 1MW total 2 units , find an accurate draw for that too.
