@@ -384,6 +384,11 @@ function firstBytes(text)
   return text
 end
 
+function looksLikeHtml(text)
+  text = tostring(text or ""):gsub("^%s+", ""):lower()
+  return text:sub(1, 9) == "<!doctype" or text:sub(1, 5) == "<html"
+end
+
 function verifyProgram(program, instance, path)
   path = path or PROGRAM_PATH
   local h = fs.open(path, "r")
@@ -391,7 +396,7 @@ function verifyProgram(program, instance, path)
   local text = h.readAll()
   h.close()
 
-  if text:find("<!DOCTYPE", 1, true) or text:find("<html", 1, true) then
+  if looksLikeHtml(text) then
     fs.delete(path)
     error("downloaded a web page, not raw Lua: " .. firstBytes(text), 0)
   end
@@ -420,7 +425,7 @@ function verifyBootloader(path)
   local text = h.readAll()
   h.close()
 
-  if text:find("<!DOCTYPE", 1, true) or text:find("<html", 1, true) then
+  if looksLikeHtml(text) then
     fs.delete(path)
     error("downloaded a web page, not raw Lua: " .. firstBytes(text), 0)
   end
