@@ -1,1 +1,1 @@
-pastebin get GdpkSWsc startup.lua 
+wget https://raw.githubusercontent.com/dadou000/codebrown/main/computercraft/bootloader_startup.lua startup.lua
