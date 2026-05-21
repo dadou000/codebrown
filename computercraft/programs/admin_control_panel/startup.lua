@@ -758,7 +758,7 @@ function isLocalUpdateEscape(err)
   return text == "local update requested" or text == "local bootloader update requested"
 end
 
-function runProgram()
+function runProgram(program, instance)
   local started = os.clock()
   local fn, loadErr = loadfile(PROGRAM_PATH)
   if not fn then error(loadErr, 0) end
@@ -766,7 +766,8 @@ function runProgram()
   if not ok then
     if isLocalUpdateEscape(err) then return nil, err end
     if os.clock() - started < 10 and restoreProgramBackup("instant crash: " .. tostring(err)) then
-      broadcastUpdateStatus(nil, nil, "failed", "rolled back after instant crash", 100)
+      broadcastUpdateStatus(program, instance, "failed", "rolled back after instant crash", 100)
+      return
     end
     error(err, 0)
   end
@@ -816,7 +817,6 @@ function validUpdateCommand(command)
     or command == "update"
     or command == "update_bootloader"
     or command == "bootloader_update"
-    or command == "install_bootloader"
 end
 
 function isUpdatePacket(pkt, program, instance)
@@ -838,7 +838,7 @@ function isUpdatePacket(pkt, program, instance)
   if target and target ~= "all" and target ~= instance.name then return false end
   if targetProgram and targetProgram ~= "all" and targetProgram ~= program.key then return false end
   if not payload.updateId or not payload.slot or not payload.total then return false end
-  if command == "update_bootloader" or command == "bootloader_update" or command == "install_bootloader" then return "bootloader" end
+  if command == "update_bootloader" or command == "bootloader_update" then return "bootloader" end
   return "program"
 end
 
@@ -913,7 +913,7 @@ while true do
   updatePayload = {}
   local ok, err = pcall(function()
     parallel.waitForAny(
-      runProgram,
+      function() return runProgram(program, instance) end,
       function()
         updateSource, updateKind, updatePayload = updateWatcher(program, instance)
         updateRequested = true
@@ -1825,6 +1825,15 @@ local function run(name, lib)
     return os.epoch and os.epoch("utc") or math.floor(os.clock() * 1000)
   end
 
+  local function telemetryFresh(lastSeen, now)
+    if not lastSeen then return true end
+    if lastSeen < 9999999999 then
+      local clockNow = os.clock()
+      return lastSeen <= clockNow + 5 and (clockNow - lastSeen) <= 30
+    end
+    return (now - lastSeen) <= 30000
+  end
+
   local function liveUpdateTargets()
     local rows = {}
     local seen = {}
@@ -1833,7 +1842,7 @@ local function run(name, lib)
       local dev = tostring((type(item) == "table" and item.name) or key)
       if dev ~= name and not seen[dev] then
         local lastSeen = type(item) == "table" and tonumber(item.lastSeen) or nil
-        local fresh = not lastSeen or lastSeen < 9999999999 or (now - lastSeen) <= 30000
+        local fresh = telemetryFresh(lastSeen, now)
         if fresh then
           seen[dev] = true
           rows[#rows + 1] = {
@@ -2038,58 +2047,6 @@ local function run(name, lib)
     end
   end
 
-  local function checksumText(text)
-    text = tostring(text or "")
-    local sum = 0
-    for i = 1, #text do
-      sum = (sum + string.byte(text, i)) % 1000000007
-    end
-    return sum
-  end
-
-  local function bootloaderChunks(text)
-    local chunkSize = 3000
-    local chunks = {}
-    for i = 1, #text, chunkSize do
-      chunks[#chunks + 1] = text:sub(i, i + chunkSize - 1)
-    end
-    if #chunks == 0 then chunks[1] = "" end
-    return chunks
-  end
-
-  local function sendBootloaderInstall(target, bootText, updateId, slot, totalTargets)
-    local chunks = bootloaderChunks(bootText)
-    local payloadId = updateId .. ":" .. tostring(target.device)
-    send({
-      command = "install_bootloader",
-      target = target.device,
-      program = target.program ~= "unknown" and target.program or "all",
-      confirm = true,
-      updateId = updateId,
-      updateKind = "bootloader",
-      delay = 0,
-      slot = slot,
-      total = totalTargets,
-      payloadId = payloadId,
-      chunks = #chunks,
-      size = #bootText,
-      checksum = checksumText(bootText),
-    }, 1)
-    sleep(0.08)
-    for index, chunk in ipairs(chunks) do
-      send({
-        command = "install_bootloader_chunk",
-        target = target.device,
-        program = target.program ~= "unknown" and target.program or "all",
-        payloadId = payloadId,
-        index = index,
-        chunks = #chunks,
-        data = chunk,
-      }, 1)
-      sleep(0.03)
-    end
-  end
-
   local function scheduleFleetUpdate(kind)
     local targets = liveUpdateTargets()
     if #targets == 0 then
@@ -2244,6 +2201,19 @@ local function run(name, lib)
     end
   end
 
+  local function drawUpdateBanner(w, h)
+    refreshUpdatePlan()
+    if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
+    local pct, done, failed, seen, total = updateProgress()
+    local kind = string.upper(tostring(s.updatePlan.kind or "update"))
+    local phase = s.updatePlan.phase == "summary" and "SUMMARY" or "ACTIVE"
+    local color = failed > 0 and colors.red or colors.yellow
+    local text = string.format(" %s %s %d%%  %d/%d seen  ok %d  fail %d", kind, phase, pct, seen, total, done, failed)
+    lib.ui.writeAt(screen, 1, h, string.rep(" ", w), colors.white, colors.gray)
+    lib.ui.writeAt(screen, 1, h, text:sub(1, math.max(1, w - 12)), color, colors.gray)
+    lib.ui.bar(screen, math.max(1, w - 10), h, math.min(10, w), pct, 100, failed > 0 and colors.red or colors.green)
+  end
+
   local function drawSettings(y, w)
     local style = currentStyle()
     lib.ui.writeAt(screen, 1, y, "Reset", colors.yellow)
@@ -2315,6 +2285,7 @@ local function run(name, lib)
     else
       drawSettings(y, w)
     end
+    drawUpdateBanner(w, h)
   end
 
   local function setThemeField(field, key)

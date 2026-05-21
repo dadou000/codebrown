@@ -751,7 +751,7 @@ function isLocalUpdateEscape(err)
   return text == "local update requested" or text == "local bootloader update requested"
 end
 
-function runProgram()
+function runProgram(program, instance)
   local started = os.clock()
   local fn, loadErr = loadfile(PROGRAM_PATH)
   if not fn then error(loadErr, 0) end
@@ -759,7 +759,8 @@ function runProgram()
   if not ok then
     if isLocalUpdateEscape(err) then return nil, err end
     if os.clock() - started < 10 and restoreProgramBackup("instant crash: " .. tostring(err)) then
-      broadcastUpdateStatus(nil, nil, "failed", "rolled back after instant crash", 100)
+      broadcastUpdateStatus(program, instance, "failed", "rolled back after instant crash", 100)
+      return
     end
     error(err, 0)
   end
@@ -809,7 +810,6 @@ function validUpdateCommand(command)
     or command == "update"
     or command == "update_bootloader"
     or command == "bootloader_update"
-    or command == "install_bootloader"
 end
 
 function isUpdatePacket(pkt, program, instance)
@@ -831,7 +831,7 @@ function isUpdatePacket(pkt, program, instance)
   if target and target ~= "all" and target ~= instance.name then return false end
   if targetProgram and targetProgram ~= "all" and targetProgram ~= program.key then return false end
   if not payload.updateId or not payload.slot or not payload.total then return false end
-  if command == "update_bootloader" or command == "bootloader_update" or command == "install_bootloader" then return "bootloader" end
+  if command == "update_bootloader" or command == "bootloader_update" then return "bootloader" end
   return "program"
 end
 
@@ -906,7 +906,7 @@ while true do
   updatePayload = {}
   local ok, err = pcall(function()
     parallel.waitForAny(
-      runProgram,
+      function() return runProgram(program, instance) end,
       function()
         updateSource, updateKind, updatePayload = updateWatcher(program, instance)
         updateRequested = true
