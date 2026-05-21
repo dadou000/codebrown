@@ -906,7 +906,7 @@ while true do
   local localRequest = consumeUpdateRequest()
   if localRequest then
     updateRequested = true
-    updateSource = "program"
+    updateSource = localRequest.source or "local_request"
     updatePayload = localRequest
     local command = localRequest.command
     if command == "update_bootloader" or command == "bootloader_update" then

@@ -913,7 +913,7 @@ while true do
   local localRequest = consumeUpdateRequest()
   if localRequest then
     updateRequested = true
-    updateSource = "program"
+    updateSource = localRequest.source or "local_request"
     updatePayload = localRequest
     local command = localRequest.command
     if command == "update_bootloader" or command == "bootloader_update" then
@@ -2273,6 +2273,10 @@ local function run(name, lib)
     elseif id == "boot_all" then
       scheduleFleetUpdate("bootloader")
     elseif id == "boot_self" then
+      lib.ui.clear(screen, colors.white, colors.purple)
+      lib.ui.center(screen, 2, "BOOTLOADER SELF UPDATE", colors.white, colors.purple)
+      lib.ui.center(screen, 4, "HANDING CONTROL TO BOOTLOADER", colors.yellow, colors.purple)
+      sleep(0.5)
       local updateId = tostring(os.getComputerID()) .. "-boot-" .. tostring(math.floor(os.clock() * 1000))
       lib.state.write("/mccr_update_request.dat", { command = "update_bootloader", source = name, localOnly = true, updateId = updateId, updateKind = "bootloader", slot = 1, total = 1, delay = 0, time = os.clock(), epoch = os.epoch and os.epoch("utc") or nil })
       error("local bootloader update requested", 0)
