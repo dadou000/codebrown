@@ -941,47 +941,102 @@ local function drawDraconicMonitor(t, lib, snap, graphMode)
   if h >= 8 then lib.ui.writeAt(t, 1, h, "GRAPH", colors.gray) end
 end
 
+local function drawDraconicCard(t, lib, x, y, w, label, value, accent, note, progress)
+  local sw, sh = lib.ui.size(t)
+  if y > sh or x > sw then return end
+  w = math.max(1, math.min(w or 0, sw - x + 1))
+  if w <= 0 then return end
+  accent = accent or colors.lightBlue
+
+  lib.ui.writeAt(t, x, y, string.rep(" ", w), colors.white, colors.gray)
+  lib.ui.writeAt(t, x, y, "> " .. string.upper(tostring(label or "CARD")), accent, colors.gray)
+
+  if y + 1 <= sh then
+    lib.ui.writeAt(t, x, y + 1, string.rep(" ", w), colors.white, colors.black)
+    lib.ui.writeAt(t, x, y + 1, lib.ui.short(tostring(value or "--"), w), colors.white, colors.black)
+  end
+
+  if progress ~= nil and y + 2 <= sh then
+    lib.ui.writeAt(t, x, y + 2, string.rep(" ", w), colors.white, colors.black)
+    lib.ui.bar(t, x, y + 2, w, math.max(0, math.min(100, tonumber(progress) or 0)), 100, accent)
+    if note and y + 3 <= sh then
+      lib.ui.writeAt(t, x, y + 3, string.rep(" ", w), colors.white, colors.black)
+      lib.ui.writeAt(t, x, y + 3, lib.ui.short(tostring(note), w), colors.gray, colors.black)
+    end
+  elseif note and y + 2 <= sh then
+    lib.ui.writeAt(t, x, y + 2, string.rep(" ", w), colors.white, colors.black)
+    lib.ui.writeAt(t, x, y + 2, lib.ui.short(tostring(note), w), colors.gray, colors.black)
+  end
+end
+
 local function drawDraconicPresentation(t, lib, snap)
   local w, h = lib.ui.size(t)
   local d = draconicSummary(snap or {})
+  local cores = d.cores or {}
   local phase = math.floor((os.clock() or 0) * 2) % 8
   lib.ui.center(t, 1, "DRACONIC ENERGY CORE", colors.red)
-  if #(d.cores or {}) == 0 then
+  if #cores == 0 then
     lib.ui.center(t, math.max(3, math.floor(h / 2)), "NO ENERGY CORE DETECTED", colors.yellow)
     return
   end
+  if w < 70 or h < 20 then
+    drawDraconicStats(t, lib, snap)
+    return
+  end
+
   local pct = tonumber(d.percent) or 0
   local bus = ((snap or {}).buses or {}).mv1 or {}
-  local artW = math.max(18, math.min(math.floor(w * 0.48), w - 36))
-  local artH = math.max(9, math.min(h - 8, 18))
+  local summary = string.format("%d core%s  %s  ETA %s", #cores, #cores == 1 and "" or "s", fmtFlow(d.netRfPerTick), tostring(d.eta or "--"))
+  lib.ui.center(t, 2, lib.ui.short(summary, w), colors.gray)
+
+  local storedBarW = math.max(8, w - 4)
+  lib.ui.bar(t, 2, 4, storedBarW, pct, 100, pct > 85 and colors.red or colors.orange)
+  writeClip(t, lib, 3, 4, string.format("STORED %0.1f%%", pct), colors.white)
+  writeClip(t, lib, math.max(2, math.floor(w * 0.58)), 4, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), colors.gray)
+
+  local stripY = 6
+  writeClip(t, lib, 2, stripY, "FLOW " .. fmtFlow(d.netRfPerTick), (tonumber(d.netRfPerTick) or 0) >= 0 and colors.green or colors.orange)
+  writeClip(t, lib, math.max(2, math.floor(w * 0.36)), stripY, "ETA " .. tostring(d.etaMode or "stable") .. " " .. tostring(d.eta or "--"), colors.lightBlue)
+  writeClip(t, lib, math.max(2, math.floor(w * 0.67)), stripY, string.format("BUS %0.0fV  %0.3fA", tonumber(bus.voltage) or 1000000, tonumber(bus.current) or 0), colors.yellow)
+
+  local artTop = 8
+  local artBottom = h - 5
+  local artW = math.max(22, math.min(math.floor(w * 0.46), w - 34))
+  local artH = math.min(18, artBottom - artTop + 1)
   local artX = 2
-  local artY = 4
-  local coreRight = artX + artW
-  local statX = math.min(w - 22, coreRight + 8)
-  local lineX = math.max(coreRight + 1, statX - 8)
+  local artY = artTop
+  local rightX = artX + artW + 2
+  local rightW = math.max(14, w - rightX - 1)
   drawCoreArt(t, lib, artX, artY, artW, artH, pct, phase)
-  drawTracer(t, lib, coreRight - 2, artY + 1, lineX, "STORED", string.format("%0.2f%%  %s", pct, fmtEnergy(d.totalEnergy)), colors.red, phase)
-  drawTracer(t, lib, coreRight - 1, artY + 4, lineX, "CAPACITY", fmtEnergy(d.totalCapacity), colors.orange, phase + 1)
-  drawTracer(t, lib, coreRight, artY + 7, lineX, "NET FLOW", fmtFlow(d.netRfPerTick), (tonumber(d.netRfPerTick) or 0) >= 0 and colors.green or colors.orange, phase + 2)
-  if artY + 10 <= h then drawTracer(t, lib, coreRight - 1, artY + 10, lineX, "ETA " .. tostring(d.etaMode or "stable"), tostring(d.eta or "--"), colors.lightBlue, phase + 3) end
-  if artY + 13 <= h then drawTracer(t, lib, coreRight - 2, artY + 13, lineX, "I/O", "IN " .. fmtFlow(d.inputRfPerTick) .. "  OUT " .. fmtFlow(d.outputRfPerTick), colors.yellow, phase) end
 
-  local barY = math.min(h - 5, artY + artH + 1)
-  local barW = math.max(10, math.min(w - 4, artW + 28))
-  writeClip(t, lib, 2, barY, "1MV DC ENERGY BUS", colors.red)
-  lib.ui.bar(t, 2, barY + 1, barW, pct, 100, pct > 85 and colors.red or colors.orange)
-  writeClip(t, lib, 2, barY + 2, string.format("V %0.0f  I %0.3fA  P %0.3fMW  CORES %d", tonumber(bus.voltage) or 1000000, tonumber(bus.current) or 0, ((tonumber(bus.watts) or 0) / 1000000), #(d.cores or {})), colors.white)
+  local cardW = math.max(12, math.floor((rightW - 2) / 2))
+  local cardGap = math.max(1, rightW - (cardW * 2))
+  local cardX2 = rightX + cardW + cardGap
+  local cardY1 = artY
+  local cardY2 = artY + 5
 
-  local listY = barY + 4
-  local colW = math.max(24, math.floor((w - 2) / math.max(1, math.min(3, #(d.cores or {})))))
-  for i, core in ipairs(d.cores or {}) do
-    local col = ((i - 1) % math.max(1, math.floor(w / colW)))
-    local row = math.floor((i - 1) / math.max(1, math.floor(w / colW)))
-    local x = 2 + col * colW
-    local y = listY + row
-    if y <= h then
-      local text = string.format("%s T%s %s %0.1f%%", tostring(core.name or core.label), tostring(core.tier or "?"), tostring(core.status or "online"), tonumber(core.percent) or 0)
-      writeClip(t, lib, x, y, text, colors.gray)
+  drawDraconicCard(t, lib, rightX, cardY1, cardW, "stored", string.format("%0.1f%%", pct), colors.red, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), pct)
+  drawDraconicCard(t, lib, cardX2, cardY1, math.max(10, rightW - cardW - cardGap), "flow", fmtFlow(d.netRfPerTick), (tonumber(d.netRfPerTick) or 0) >= 0 and colors.green or colors.orange, "IN " .. fmtFlow(d.inputRfPerTick) .. "  OUT " .. fmtFlow(d.outputRfPerTick))
+  drawDraconicCard(t, lib, rightX, cardY2, cardW, "bus", string.format("%0.0fV", tonumber(bus.voltage) or 1000000), colors.yellow, string.format("%0.3fA  %0.3fMW", tonumber(bus.current) or 0, ((tonumber(bus.watts) or 0) / 1000000)))
+  drawDraconicCard(t, lib, cardX2, cardY2, math.max(10, rightW - cardW - cardGap), "status", string.upper(tostring(d.etaMode or "stable")), colors.lightBlue, "ETA " .. tostring(d.eta or "--"))
+
+  local listY = math.max(artY + artH + 1, cardY2 + 4)
+  if listY <= h then
+    writeClip(t, lib, 2, listY, "CORE NODES", colors.red)
+    listY = listY + 1
+    local cols = rightW >= 28 and 2 or 1
+    local colW = math.max(18, math.floor((w - 2) / cols))
+    for i, core in ipairs(cores) do
+      local col = (i - 1) % cols
+      local row = math.floor((i - 1) / cols)
+      local x = 2 + col * colW
+      local y = listY + row
+      if y <= h then
+        local status = tostring(core.status or "online"):upper()
+        local line = string.format("%s T%s %s %0.1f%% %s", tostring(core.label or core.name), tostring(core.tier or "?"), status, tonumber(core.percent) or 0, fmtFlow(core.netRfPerTick))
+        local c = (tonumber(core.percent) or 0) >= 75 and colors.green or ((tonumber(core.percent) or 0) >= 25 and colors.yellow or colors.red)
+        writeClip(t, lib, x, y, line, c)
+      end
     end
   end
 end
