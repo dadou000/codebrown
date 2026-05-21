@@ -1955,9 +1955,31 @@ local function run(name, lib)
     local stepDelay = 0.5
     local bootText = kind == "bootloader" and bootloaderPayload() or nil
     if kind == "bootloader" and not mccrValidBootloaderText(bootText) then
-      s.updateStatus = { admin_control_panel = { device = "admin_control_panel", stage = "failed", detail = "no valid embedded bootloader", progress = 100 } }
-      s.updatePlan = nil
-      s.updateUntil = os.clock() + 20
+      local now = os.clock()
+      local updateId = tostring(os.getComputerID()) .. "-boot-invalid-" .. tostring(math.floor(now * 1000))
+      s.updatePlan = {
+        id = updateId,
+        kind = "bootloader",
+        phase = "summary",
+        startedAt = now,
+        summaryUntil = now + 12,
+        count = 1,
+        targets = {
+          admin_control_panel = {
+            device = "admin_control_panel",
+            program = "admin_control_panel",
+            slot = 1,
+            total = 1,
+            stage = "failed",
+            detail = "no valid embedded bootloader",
+            progress = 100,
+            scheduledAt = now,
+            lastStatus = now,
+          },
+        },
+      }
+      s.updateStatus = s.updatePlan.targets
+      s.updateUntil = now + 20
       saveUpdatePlan()
       return
     end
