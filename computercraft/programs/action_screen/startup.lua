@@ -982,6 +982,7 @@ local function run(name, lib)
   local s = lib.state.read(statePath, { snapshot = {}, eval = {}, cycle = 0 })
   local screen = lib.ui.target(lib.devices.spec(name))
   lib.ui.boot(screen, lib.devices.spec(name).label or name)
+  mccrDrawConsoleStatus(name, "running")
   lib.net.open()
 
   while true do
@@ -1108,6 +1109,45 @@ local lib = {
   ui = load_ui(),
 }
 
+function mccrBootloaderVersion(path)
+  path = path or "/startup.lua"
+  if not fs.exists(path) then return "missing" end
+  local h = fs.open(path, "r")
+  if not h then return "unknown" end
+  local text = h.readAll()
+  h.close()
+  return text:match("%-%-version([%w%._%-]+)") or "unknown"
+end
+
+function mccrDrawConsoleStatus(name, state)
+  local t = term.native and term.native() or term.current()
+  if not t then return end
+  local hasMonitor = false
+  if peripheral and peripheral.find then
+    local ok, mon = pcall(peripheral.find, "monitor")
+    hasMonitor = ok and mon ~= nil
+  end
+  pcall(t.setBackgroundColor, colors.black)
+  pcall(t.setTextColor, colors.white)
+  pcall(t.clear)
+  pcall(t.setCursorPos, 1, 1)
+  pcall(t.setTextColor, colors.lightBlue)
+  pcall(t.write, "MCCR ONLINE")
+  pcall(t.setCursorPos, 1, 3)
+  pcall(t.setTextColor, colors.white)
+  pcall(t.write, "Device: " .. tostring(name or MCCR_DEFAULT_NAME or "unknown"))
+  pcall(t.setCursorPos, 1, 4)
+  pcall(t.write, "Program: " .. tostring(MCCR_PROGRAM or "unknown"))
+  pcall(t.setCursorPos, 1, 5)
+  pcall(t.write, "Firmware: v" .. tostring(MCCR_VERSION or "unknown"))
+  pcall(t.setCursorPos, 1, 6)
+  pcall(t.write, "Bootloader: v" .. tostring(mccrBootloaderVersion()))
+  pcall(t.setCursorPos, 1, 8)
+  pcall(t.setTextColor, colors.gray)
+  pcall(t.write, "State: " .. tostring(state or "running"))
+  pcall(t.setCursorPos, 1, 9)
+  pcall(t.write, "UI: " .. (hasMonitor and "external monitor" or "console fallback"))
+end
 local CONFIG_PATH = "/mccr_device.dat"
 
 local function allowed(name)

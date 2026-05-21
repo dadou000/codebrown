@@ -172,7 +172,7 @@ function broadcastUpdateStatus(program, instance, stage, detail, progress, extra
 end
 
 function attachedDisplays()
-  local out = { term.current() }
+  local out = {}
   if peripheral then
     for _, side in ipairs(peripheral.getNames()) do
       if peripheral.getType(side) == "monitor" then
@@ -234,7 +234,45 @@ function programVersion(path)
   return version or "unknown"
 end
 
+function bootloaderVersion(path)
+  path = path or STARTUP_PATH
+  if not fs.exists(path) then return "missing" end
+  local h = fs.open(path, "r")
+  if not h then return "unknown" end
+  local text = h.readAll()
+  h.close()
+  return text:match("%-%-version([%w%._%-]+)") or "unknown"
+end
+
+function drawConsoleStatus(program, instance, stage, detail)
+  local t = term.native and term.native() or term.current()
+  if not t then return end
+  pcall(t.setBackgroundColor, colors.black)
+  pcall(t.setTextColor, colors.white)
+  pcall(t.clear)
+  pcall(t.setCursorPos, 1, 1)
+  pcall(t.setTextColor, colors.lightBlue)
+  pcall(t.write, "MCCR COMPUTER")
+  pcall(t.setCursorPos, 1, 3)
+  pcall(t.setTextColor, colors.white)
+  pcall(t.write, "Device: " .. tostring(instance and instance.name or "unknown"))
+  pcall(t.setCursorPos, 1, 4)
+  pcall(t.write, "Program: " .. tostring(program and program.key or "unknown"))
+  pcall(t.setCursorPos, 1, 5)
+  pcall(t.write, "Firmware: v" .. tostring(programVersion()))
+  pcall(t.setCursorPos, 1, 6)
+  pcall(t.write, "Bootloader: v" .. tostring(bootloaderVersion()))
+  pcall(t.setCursorPos, 1, 8)
+  pcall(t.setTextColor, colors.gray)
+  pcall(t.write, "State: " .. tostring(stage or "running"))
+  if detail then
+    pcall(t.setCursorPos, 1, 9)
+    pcall(t.write, tostring(detail))
+  end
+end
+
 function drawBootUpdate(stage, detail, program, instance)
+  drawConsoleStatus(program, instance, tostring(stage or "update"):lower(), detail)
   local headline = tostring(stage or "UPDATE")
   if headline == "FIRMWARE" then headline = "FIRMWARE UPDATE"
   elseif headline == "BOOTLOADER" then headline = "BOOTLOADER UPDATE"
@@ -888,6 +926,7 @@ end
 
 local cfg = readTable(BOOT_CONFIG, {})
 local program, instance = chooseMapping(cfg)
+drawConsoleStatus(program, instance, "starting firmware")
 ensureProgram(cfg, program, instance)
 
 local updateRequested = false
@@ -958,11 +997,13 @@ while true do
     end
     if updateKind == "bootloader" then
       print("Downloading current bootloader...")
+      drawConsoleStatus(program, instance, "bootloader update", "starting")
       broadcastUpdateStatus(program, instance, "starting", "bootloader", 10)
       drawBootUpdate("BOOTLOADER", "starting", program, instance)
       sleep(1)
       downloadBootloader(program, instance)
       print("Rebooting to new bootloader...")
+      drawConsoleStatus(program, instance, "rebooting", "bootloader installed")
       drawBootUpdate("BOOTLOADER", "rebooting", program, instance)
       broadcastUpdateStatus(program, instance, "rebooting", "rebooting", 100)
       sleep(1)
@@ -1631,6 +1672,7 @@ local function run(name, lib)
   s.pendingBreakers = s.pendingBreakers or {}
   local screen = lib.ui.target(lib.devices.spec(name))
   lib.ui.boot(screen, lib.devices.spec(name).label or name)
+  mccrDrawConsoleStatus(name, "running")
   lib.net.open()
   local buttons = {}
 
@@ -2352,6 +2394,45 @@ local lib = {
   ui = load_ui(),
 }
 
+function mccrBootloaderVersion(path)
+  path = path or "/startup.lua"
+  if not fs.exists(path) then return "missing" end
+  local h = fs.open(path, "r")
+  if not h then return "unknown" end
+  local text = h.readAll()
+  h.close()
+  return text:match("%-%-version([%w%._%-]+)") or "unknown"
+end
+
+function mccrDrawConsoleStatus(name, state)
+  local t = term.native and term.native() or term.current()
+  if not t then return end
+  local hasMonitor = false
+  if peripheral and peripheral.find then
+    local ok, mon = pcall(peripheral.find, "monitor")
+    hasMonitor = ok and mon ~= nil
+  end
+  pcall(t.setBackgroundColor, colors.black)
+  pcall(t.setTextColor, colors.white)
+  pcall(t.clear)
+  pcall(t.setCursorPos, 1, 1)
+  pcall(t.setTextColor, colors.lightBlue)
+  pcall(t.write, "MCCR ONLINE")
+  pcall(t.setCursorPos, 1, 3)
+  pcall(t.setTextColor, colors.white)
+  pcall(t.write, "Device: " .. tostring(name or MCCR_DEFAULT_NAME or "unknown"))
+  pcall(t.setCursorPos, 1, 4)
+  pcall(t.write, "Program: " .. tostring(MCCR_PROGRAM or "unknown"))
+  pcall(t.setCursorPos, 1, 5)
+  pcall(t.write, "Firmware: v" .. tostring(MCCR_VERSION or "unknown"))
+  pcall(t.setCursorPos, 1, 6)
+  pcall(t.write, "Bootloader: v" .. tostring(mccrBootloaderVersion()))
+  pcall(t.setCursorPos, 1, 8)
+  pcall(t.setTextColor, colors.gray)
+  pcall(t.write, "State: " .. tostring(state or "running"))
+  pcall(t.setCursorPos, 1, 9)
+  pcall(t.write, "UI: " .. (hasMonitor and "external monitor" or "console fallback"))
+end
 local CONFIG_PATH = "/mccr_device.dat"
 
 local function allowed(name)
