@@ -921,6 +921,10 @@ local function run(name, lib)
       end
     elseif pkt.kind == "update_status" then
       local p = pkt.payload or {}
+      if p.updateId and s.activeUpdateId and p.updateId ~= s.activeUpdateId then
+        s.updateStatus = {}
+      end
+      if p.updateId then s.activeUpdateId = p.updateId end
       local key = tostring(p.device or pkt.source or pkt.id or "unknown")
       s.updateStatus = s.updateStatus or {}
       s.updateStatus[key] = {
@@ -970,6 +974,9 @@ local function run(name, lib)
         item.lastLocal = now
       end
     end
+    local remaining = false
+    for _ in pairs(s.updateStatus or {}) do remaining = true; break end
+    if not remaining then s.activeUpdateId = nil end
   end
 
   local function draw()

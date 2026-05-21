@@ -1632,8 +1632,8 @@ local screenTargets = {
   { key = "statsm5", label = "S5" },
   { key = "statsm6", label = "S6" },
 }
-local presentationContexts = { "overview", "power", "ae2", "draconic", "battery", "computers", "alarms", "fission", "fusion" }
-local statsContexts = { "all", "devices", "peripherals", "power", "breakers", "alarms", "draconic" }
+local presentationContexts = { "overview", "power", "ae2", "draconic", "battery", "computers", "alarms", "fission", "fusion", "updates" }
+local statsContexts = { "all", "devices", "peripherals", "power", "breakers", "alarms", "draconic", "updates" }
 local colorOptions = {
   { key = "white", label = "W", value = colors.white },
   { key = "green", label = "G", value = colors.green },
@@ -1818,17 +1818,17 @@ local function run(name, lib)
 
   local function updateProgress()
     local expected, total = updateExpected()
-    local sum, done, failed, seen = 0, 0, 0, 0
+    local sum, done, failed, ack = 0, 0, 0, 0
     for dev in pairs(expected) do
       local item = s.updatePlan and s.updatePlan.targets and s.updatePlan.targets[dev]
       if item then
-        seen = seen + 1
+        if item.lastStatus then ack = ack + 1 end
         if item.stage == "done" or item.stage == "rebooting" then done = done + 1 end
         if item.stage == "failed" or item.stage == "timeout" then failed = failed + 1 end
         sum = sum + smoothProgress(item)
       end
     end
-    return math.floor(sum / total), done, failed, seen, total
+    return math.floor(sum / total), done, failed, ack, total
   end
 
   local function refreshUpdatePlan()
@@ -2130,10 +2130,10 @@ local function run(name, lib)
   local function drawUpdatePanel(y, w, h)
     refreshUpdatePlan()
     if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
-    local pct, done, failed, seen, total = updateProgress()
+    local pct, done, failed, ack, total = updateProgress()
     local kind = (s.updatePlan and s.updatePlan.kind) or "update"
     local phase = s.updatePlan.phase == "summary" and "SUMMARY" or "ACTIVE"
-    lib.ui.writeAt(screen, 1, y, string.format("%s %s %d%%  %d/%d seen  done %d  fail %d", string.upper(kind), phase, pct, seen, total, done, failed), failed > 0 and colors.red or colors.yellow)
+    lib.ui.writeAt(screen, 1, y, string.format("%s %s %d%%  nodes %d  ack %d  done %d  fail %d", string.upper(kind), phase, pct, total, ack, done, failed), failed > 0 and colors.red or colors.yellow)
     lib.ui.bar(screen, 1, y + 1, math.max(8, w - 2), pct, 100, failed > 0 and colors.red or colors.green)
     y = y + 3
 
@@ -2162,11 +2162,11 @@ local function run(name, lib)
     refreshUpdatePlan()
     if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
     if h < 8 then return end
-    local pct, done, failed, seen, total = updateProgress()
+    local pct, done, failed, ack, total = updateProgress()
     local kind = string.upper(tostring(s.updatePlan.kind or "update"))
     local phase = s.updatePlan.phase == "summary" and "SUMMARY" or "ACTIVE"
     local color = failed > 0 and colors.red or colors.yellow
-    local text = string.format(" %s %s %d%%  %d/%d seen  ok %d  fail %d", kind, phase, pct, seen, total, done, failed)
+    local text = string.format(" %s %s %d%%  nodes %d  ack %d  ok %d  fail %d", kind, phase, pct, total, ack, done, failed)
     lib.ui.writeAt(screen, 1, h, string.rep(" ", w), colors.white, colors.gray)
     lib.ui.writeAt(screen, 1, h, text:sub(1, math.max(1, w - 12)), color, colors.gray)
     lib.ui.bar(screen, math.max(1, w - 10), h, math.min(10, w), pct, 100, failed > 0 and colors.red or colors.green)

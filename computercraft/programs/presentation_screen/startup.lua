@@ -1099,12 +1099,23 @@ local function updateTerminal(status)
   return any
 end
 
+local function updateHasRows(status)
+  for _, item in pairs(status or {}) do
+    if type(item) == "table" then return true end
+  end
+  return false
+end
 local function updateHoldSeconds(status)
   return updateTerminal(status) and 8 or 90
 end
 
 local function setUpdateStatus(s, status)
   s.updateStatus = status or {}
+  if not updateHasRows(s.updateStatus) then
+    s.updateTerminalSince = nil
+    s.updateUntil = 0
+    return
+  end
   if updateTerminal(s.updateStatus) then
     s.updateTerminalSince = s.updateTerminalSince or os.clock()
     local remaining = 8 - (os.clock() - s.updateTerminalSince)
@@ -1168,6 +1179,31 @@ local function drawUpdateStatus(t, lib, s)
   if #rows == 0 then lib.ui.writeAt(t, 1, 5, "Waiting for scheduled update status", colors.gray) end
 end
 
+local function drawUpdateBanner(t, lib, s)
+  if not (s.updateUntil and os.clock() < s.updateUntil) then return end
+  if not updateHasRows(s.updateStatus) then return end
+  local w, h = lib.ui.size(t)
+  if h < 4 then return end
+  local sum, done, failed, nodes = 0, 0, 0, 0
+  local kind = "update"
+  for _, item in pairs(s.updateStatus or {}) do
+    if type(item) == "table" then
+      nodes = nodes + 1
+      kind = tostring(item.updateKind or item.kind or kind)
+      local p = tonumber(item.progress) or 0
+      if item.stage == "done" or item.stage == "rebooting" then p = 100; done = done + 1 end
+      if item.stage == "failed" or item.stage == "timeout" then p = 100; failed = failed + 1 end
+      sum = sum + math.max(0, math.min(100, p))
+    end
+  end
+  if nodes <= 0 then return end
+  local pct = math.floor(sum / nodes)
+  local text = string.format(" %s UPDATE %d%%  done %d/%d  fail %d", string.upper(kind), pct, done, nodes, failed)
+  local color = failed > 0 and colors.red or colors.yellow
+  lib.ui.writeAt(t, 1, h, string.rep(" ", w), colors.white, colors.gray)
+  lib.ui.writeAt(t, 1, h, text:sub(1, math.max(1, w - 10)), color, colors.gray)
+  lib.ui.bar(t, math.max(1, w - 8), h, math.min(8, w), pct, 100, failed > 0 and colors.red or colors.green)
+end
 
 local function drawVersions(t, lib, snap, name)
   local w, h = lib.ui.size(t)
@@ -1228,7 +1264,7 @@ local function run(name, lib)
     local presentationFeedOff = (s.snapshot.breakers or {}).main_computer == false and tostring(spec.display or ""):find("^presentation")
     if s.showVersionsUntil and os.clock() < s.showVersionsUntil then
       drawVersions(screen, lib, s.snapshot, name)
-    elseif s.updateUntil and os.clock() < s.updateUntil then
+    elseif displayMode(s.snapshot, name, "overview") == "updates" and s.updateUntil and os.clock() < s.updateUntil then
       drawUpdateStatus(screen, lib, s)
     elseif presentationFeedOff then
       s.sleepTick = (s.sleepTick or 0) + 1
@@ -1252,6 +1288,7 @@ local function run(name, lib)
     elseif spec.display == "stats" then s.sleepTick = 0; drawStats(screen, lib, s.snapshot, name)
     elseif spec.display == "monitor" then s.sleepTick = 0; drawMonitor(screen, lib, s.snapshot, name, s.graphMode)
     else s.sleepTick = 0; drawPresentation(screen, lib, s.snapshot, name) end
+    if displayMode(s.snapshot, name, "overview") ~= "updates" then drawUpdateBanner(screen, lib, s) end
 
     lib.net.broadcast(name, "telemetry", eval)
     lib.state.write(statePath, {
@@ -1280,26 +1317,6 @@ local function run(name, lib)
           s.snapshot.screenStyle = s.snapshot.screenStyle or {}
           for k, v in pairs(s.localStyle) do s.snapshot.screenStyle[k] = v end
         end
-      elseif pkt and pkt.kind == "update_status" and pkt.payload then
-        s.updateStatus = s.updateStatus or {}
-        local p = pkt.payload
-        local key = tostring(p.device or pkt.source or pkt.id or "unknown")
-        s.updateStatus[key] = {
-          device = p.device or key,
-          program = p.program,
-          stage = p.stage,
-          detail = p.detail,
-          progress = p.progress,
-          version = p.version or p.currentVersion,
-          currentVersion = p.currentVersion or p.version,
-          updateId = p.updateId,
-          updateKind = p.updateKind,
-          slot = p.slot,
-          total = p.total,
-          eta = p.eta,
-          ts = p.ts,
-        }
-        setUpdateStatus(s, s.updateStatus)
       elseif pkt and pkt.kind == "command" and pkt.payload then
         local p = pkt.payload
         if p.command == "restore" then
