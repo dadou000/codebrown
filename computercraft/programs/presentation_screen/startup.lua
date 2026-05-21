@@ -1324,7 +1324,7 @@ local function run(name, lib)
   mccrDrawConsoleStatus(name, "running")
   lib.net.open()
 
-  while true do
+  local function drawFrame()
     local spec = lib.devices.spec(name)
     s.snapshot = s.snapshot or {}
     local eval = lib.power.evaluate(spec, lib.power.inputFor(spec, s.snapshot), s.eval)
@@ -1333,10 +1333,13 @@ local function run(name, lib)
     s.eval = eval
 
     styledClear(screen, lib, s.snapshot)
+    local w, h = lib.ui.size(screen)
+    local largeEnough = w >= 60 and h >= 12
+    local mode = displayMode(s.snapshot, name, "overview")
     local presentationFeedOff = (s.snapshot.breakers or {}).main_computer == false and tostring(spec.display or ""):find("^presentation")
     if s.showVersionsUntil and os.clock() < s.showVersionsUntil then
       drawVersions(screen, lib, s.snapshot, name)
-    elseif displayMode(s.snapshot, name, "overview") == "updates" and s.updateUntil and os.clock() < s.updateUntil then
+    elseif mode == "updates" and largeEnough and s.updateUntil and os.clock() < s.updateUntil then
       drawUpdateStatus(screen, lib, s)
     elseif presentationFeedOff then
       s.sleepTick = (s.sleepTick or 0) + 1
@@ -1360,9 +1363,14 @@ local function run(name, lib)
     elseif spec.display == "stats" then s.sleepTick = 0; drawStats(screen, lib, s.snapshot, name)
     elseif spec.display == "monitor" then s.sleepTick = 0; drawMonitor(screen, lib, s.snapshot, name, s.graphMode)
     else s.sleepTick = 0; drawPresentation(screen, lib, s.snapshot, name) end
-    if displayMode(s.snapshot, name, "overview") ~= "updates" then drawUpdateBanner(screen, lib, s) end
+    if mode ~= "updates" or not largeEnough then drawUpdateBanner(screen, lib, s) end
+  end
 
-    lib.net.broadcast(name, "telemetry", eval)
+  local function publishTelemetry()
+    if s.eval then lib.net.broadcast(name, "telemetry", s.eval) end
+  end
+
+  local function saveState()
     lib.state.write(statePath, {
       eval = s.eval,
       cycle = s.cycle,
@@ -1371,57 +1379,86 @@ local function run(name, lib)
       localStyle = s.localStyle,
       graphMode = s.graphMode,
     })
-    local function handlePacket(pkt)
-      if pkt and pkt.kind == "snapshot" then
-        s.snapshot = pkt.payload or s.snapshot
-        setUpdateStatus(s, s.snapshot.updateStatus or {})
-        if s.localContexts then
+  end
+
+  local function handlePacket(pkt)
+    if pkt and pkt.kind == "snapshot" then
+      s.snapshot = pkt.payload or s.snapshot
+      setUpdateStatus(s, s.snapshot.updateStatus or {})
+      if s.localContexts then
+        s.snapshot.displayContexts = s.snapshot.displayContexts or {}
+        for k, v in pairs(s.localContexts) do s.snapshot.displayContexts[k] = v end
+      end
+      if s.localStyle then
+        s.snapshot.screenStyle = s.snapshot.screenStyle or {}
+        for k, v in pairs(s.localStyle) do s.snapshot.screenStyle[k] = v end
+      end
+      return true
+    elseif pkt and pkt.kind == "command" and pkt.payload then
+      local spec = lib.devices.spec(name)
+      local p = pkt.payload
+      if p.command == "restore" then
+        s.eval = {}
+        return true
+      elseif p.command == "show_versions" then
+        if targetMatches(p.target, name, spec) then
+          s.showVersionsUntil = os.clock() + math.max(5, tonumber(p.duration) or 20)
+          return true
+        end
+      elseif p.command == "display_context" and p.mode then
+        if targetMatches(p.target, name, spec) then
+          s.localContexts = s.localContexts or {}
+          s.localContexts[name] = tostring(p.mode)
           s.snapshot.displayContexts = s.snapshot.displayContexts or {}
-          for k, v in pairs(s.localContexts) do s.snapshot.displayContexts[k] = v end
+          s.snapshot.displayContexts[name] = tostring(p.mode)
+          return true
         end
-        if s.localStyle then
-          s.snapshot.screenStyle = s.snapshot.screenStyle or {}
-          for k, v in pairs(s.localStyle) do s.snapshot.screenStyle[k] = v end
-        end
-      elseif pkt and pkt.kind == "command" and pkt.payload then
-        local p = pkt.payload
-        if p.command == "restore" then
-          s.eval = {}
-        elseif p.command == "show_versions" then
-          if targetMatches(p.target, name, spec) then
-            s.showVersionsUntil = os.clock() + math.max(5, tonumber(p.duration) or 20)
-          end
-        elseif p.command == "display_context" and p.mode then
-          if targetMatches(p.target, name, spec) then
-            s.localContexts = s.localContexts or {}
-            s.localContexts[name] = tostring(p.mode)
-            s.snapshot.displayContexts = s.snapshot.displayContexts or {}
-            s.snapshot.displayContexts[name] = tostring(p.mode)
-          end
-        elseif p.command == "theme" then
-          s.localStyle = s.localStyle or {}
-          s.snapshot.screenStyle = s.snapshot.screenStyle or {}
-          if p.textColor then s.localStyle.textColor = p.textColor; s.snapshot.screenStyle.textColor = p.textColor end
-          if p.bgColor then s.localStyle.bgColor = p.bgColor; s.snapshot.screenStyle.bgColor = p.bgColor end
-          if p.theme then s.localStyle.theme = p.theme; s.snapshot.screenStyle.theme = p.theme end
-        end
+      elseif p.command == "theme" then
+        s.localStyle = s.localStyle or {}
+        s.snapshot.screenStyle = s.snapshot.screenStyle or {}
+        if p.textColor then s.localStyle.textColor = p.textColor; s.snapshot.screenStyle.textColor = p.textColor end
+        if p.bgColor then s.localStyle.bgColor = p.bgColor; s.snapshot.screenStyle.bgColor = p.bgColor end
+        if p.theme then s.localStyle.theme = p.theme; s.snapshot.screenStyle.theme = p.theme end
+        return true
       end
     end
-    local timer = os.startTimer(1)
-    while true do
-      local ev = { os.pullEvent() }
-      if ev[1] == "timer" and ev[2] == timer then
-        break
-      elseif ev[1] == "rednet_message" then
-        local pkt, protocol = ev[3], ev[4]
-        if protocol == lib.net.protocol and type(pkt) == "table" and pkt.system == "mccr" then
-          handlePacket(pkt)
-        end
-      elseif (ev[1] == "monitor_touch" or ev[1] == "mouse_click") and spec.display == "monitor" then
-        if displayMode(s.snapshot, name, "overview") == "draconic" then
-          s.graphMode = not s.graphMode
-        end
+    return false
+  end
+
+  drawFrame()
+  publishTelemetry()
+  local redrawTimer = os.startTimer(0.25)
+  local telemetryTimer = os.startTimer(1)
+  local saveTimer = os.startTimer(5)
+  local dirty = false
+
+  while true do
+    local ev = { os.pullEvent() }
+    if ev[1] == "rednet_message" then
+      local pkt, protocol = ev[3], ev[4]
+      if protocol == lib.net.protocol and type(pkt) == "table" and pkt.system == "mccr" then
+        dirty = handlePacket(pkt) or dirty
       end
+    elseif ev[1] == "timer" and ev[2] == redrawTimer then
+      dirty = true
+      redrawTimer = os.startTimer(0.25)
+    elseif ev[1] == "timer" and ev[2] == telemetryTimer then
+      publishTelemetry()
+      telemetryTimer = os.startTimer(1)
+    elseif ev[1] == "timer" and ev[2] == saveTimer then
+      saveState()
+      saveTimer = os.startTimer(5)
+    elseif ev[1] == "monitor_touch" or ev[1] == "mouse_click" then
+      local spec = lib.devices.spec(name)
+      if spec.display == "monitor" and displayMode(s.snapshot, name, "overview") == "draconic" then
+        s.graphMode = not s.graphMode
+        dirty = true
+      end
+    end
+
+    if dirty then
+      drawFrame()
+      dirty = false
     end
   end
 end
