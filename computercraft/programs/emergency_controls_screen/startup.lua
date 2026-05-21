@@ -583,6 +583,7 @@ local function load_role_emergency()
 local function run(name, lib)
   local statePath = "/mccr_state/" .. name .. ".dat"
   local s = lib.state.read(statePath, { snapshot = {}, eval = {} })
+  s.showVersionsUntil = nil
   local screen = lib.ui.target(lib.devices.spec(name))
   lib.ui.boot(screen, lib.devices.spec(name).label or name)
   mccrDrawConsoleStatus(name, "running")
@@ -659,7 +660,11 @@ local function run(name, lib)
   while true do
     draw()
     lib.net.broadcast(name, "telemetry", s.eval)
-    lib.state.write(statePath, s)
+    local persisted = {}
+    for k, v in pairs(s) do
+      if k ~= "showVersionsUntil" then persisted[k] = v end
+    end
+    lib.state.write(statePath, persisted)
     local timer = os.startTimer(1)
     while true do
       local ev = { os.pullEvent() }

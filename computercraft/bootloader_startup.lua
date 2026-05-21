@@ -183,6 +183,23 @@ function displaySize(t)
   return 51, 19
 end
 
+function drawBar(t, x, y, w, value, maxValue, fg, bg)
+  local sw, h = displaySize(t)
+  if y < 1 or y > h or x > sw then return end
+  x = math.max(1, x)
+  w = math.max(1, math.min(w or sw, sw - x + 1))
+  maxValue = maxValue or 100
+  value = math.max(0, math.min(maxValue, tonumber(value) or 0))
+  local fill = math.floor((value / maxValue) * w)
+  pcall(t.setCursorPos, x, y)
+  pcall(t.setBackgroundColor, bg or colors.gray)
+  pcall(t.write, string.rep(" ", w))
+  pcall(t.setCursorPos, x, y)
+  pcall(t.setBackgroundColor, fg or colors.green)
+  pcall(t.write, string.rep(" ", fill))
+  pcall(t.setBackgroundColor, colors.black)
+end
+
 function writeCenter(t, y, text, fg, bg)
   local w, h = displaySize(t)
   if y < 1 or y > h then return end
@@ -205,11 +222,14 @@ function drawBootCountdown(seconds, program, instance)
   for remaining = seconds, 1, -1 do
     for _, t in ipairs(attachedDisplays()) do
       clearDisplay(t, colors.white, colors.blue)
-      local _, h = displaySize(t)
+      local w, h = displaySize(t)
       local mid = math.max(2, math.floor(h / 2) - 1)
+      local progress = seconds > 0 and math.floor(((seconds - remaining) / seconds) * 100) or 0
       writeCenter(t, mid, "BOOTLOADER UPDATE", colors.white, colors.blue)
       writeCenter(t, mid + 2, "RESTART IN " .. tostring(remaining) .. "s", colors.white, colors.blue)
       writeCenter(t, mid + 4, tostring(instance and instance.name or "device"), colors.lightBlue, colors.blue)
+      drawBar(t, math.max(1, math.floor(w * 0.15)), mid + 6, math.max(8, math.floor(w * 0.7)), progress, 100, colors.green, colors.gray)
+      writeCenter(t, mid + 7, tostring(math.floor(progress)) .. "%", colors.white, colors.blue)
     end
     broadcastUpdateStatus(program, instance, "countdown", tostring(remaining) .. "s", 5, { eta = remaining })
     sleep(1)
@@ -264,22 +284,33 @@ function drawConsoleStatus(program, instance, stage, detail)
   end
 end
 
-function drawBootUpdate(stage, detail, program, instance)
+function drawBootUpdate(kind, stage, detail, program, instance, progress)
   drawConsoleStatus(program, instance, tostring(stage or "update"):lower(), detail)
-  local headline = tostring(stage or "UPDATE")
+  local headline = tostring(kind or "UPDATE")
   if headline == "FIRMWARE" then headline = "FIRMWARE UPDATE"
   elseif headline == "BOOTLOADER" then headline = "BOOTLOADER UPDATE"
   else headline = headline .. " UPDATE" end
-  local sub = tostring(detail or "")
+  local sub = tostring(stage or "")
+  if detail and detail ~= "" then
+    sub = sub ~= "" and (sub .. "  " .. tostring(detail)) or tostring(detail)
+  end
   if program and instance then
     sub = tostring(program.key) .. " " .. tostring(instance.name) .. " v" .. programVersion() .. "  " .. sub
   end
   for _, t in ipairs(attachedDisplays()) do
     clearDisplay(t, colors.white, colors.blue)
-    local _, h = displaySize(t)
+    local w, h = displaySize(t)
     local mid = math.max(2, math.floor(h / 2) - 1)
     writeCenter(t, mid, headline, colors.white, colors.blue)
     writeCenter(t, mid + 2, sub, colors.lightBlue, colors.blue)
+    if progress ~= nil then
+      local barW = math.max(12, math.floor(w * 0.7))
+      barW = math.max(8, math.min(barW, w - 2))
+      local x = math.max(1, math.floor((w - barW) / 2) + 1)
+      local pct = math.max(0, math.min(100, tonumber(progress) or 0))
+      drawBar(t, x, mid + 4, barW, pct, 100, colors.green, colors.gray)
+      writeCenter(t, mid + 5, tostring(math.floor(pct)) .. "%", colors.white, colors.blue)
+    end
   end
 end
 
@@ -616,21 +647,20 @@ end
 function downloadProgramOnce(program, instance, attempt)
   local urls = urlsFor(program)
   if fs.exists(PROGRAM_TMP) then fs.delete(PROGRAM_TMP) end
-  clear()
-  drawBootUpdate("FIRMWARE", "download attempt " .. tostring(attempt or 1), program, instance)
+  drawBootUpdate("FIRMWARE", "downloading", "attempt " .. tostring(attempt or 1), program, instance, 25)
   broadcastUpdateStatus(program, instance, "downloading", "attempt " .. tostring(attempt or 1), 25)
-  print("Downloading MCCR " .. program.key .. " program...")
-  print("Instance: " .. instance.name)
-  print("Sources: " .. tostring(#urls))
+  drawConsoleStatus(program, instance, "downloading", "program attempt " .. tostring(attempt or 1))
 
-  local usedUrl = downloadFirstUrlTo(urls, PROGRAM_TMP)
-  print("Used: " .. tostring(usedUrl))
-  drawBootUpdate("FIRMWARE", "verifying", program, instance)
+  downloadFirstUrlTo(urls, PROGRAM_TMP)
+  broadcastUpdateStatus(program, instance, "downloading", "downloaded", 80)
+  drawBootUpdate("FIRMWARE", "verifying", "GitHub source", program, instance, 85)
   verifyProgram(program, instance, PROGRAM_TMP)
   broadcastUpdateStatus(program, instance, "verifying", "ok", 85)
-  drawBootUpdate("FIRMWARE", "installing", program, instance)
+  drawBootUpdate("FIRMWARE", "installing", "program", program, instance, 92)
+  broadcastUpdateStatus(program, instance, "installing", "program", 92)
   replaceProgram()
   broadcastUpdateStatus(program, instance, "done", "installed", 100)
+  drawBootUpdate("FIRMWARE", "done", "installed", program, instance, 100)
 end
 
 function bootloaderUrl()
@@ -658,36 +688,37 @@ end
 function downloadBootloaderOnce(program, instance, attempt)
   local urls = bootloaderUrls()
   local url = urls[1]
-  clear()
-  drawBootUpdate("BOOTLOADER", "download attempt " .. tostring(attempt or 1), program, instance)
-  broadcastUpdateStatus(program, instance, "bootloader", "attempt " .. tostring(attempt or 1), 25)
-  print("Downloading MCCR bootloader...")
-  print("Instance: " .. instance.name)
-  print("Source: " .. tostring(url))
+  drawBootUpdate("BOOTLOADER", "starting", "attempt " .. tostring(attempt or 1), program, instance, 10)
+  broadcastUpdateStatus(program, instance, "starting", "bootloader attempt " .. tostring(attempt or 1), 10)
+  drawConsoleStatus(program, instance, "starting", "bootloader attempt " .. tostring(attempt or 1))
 
   if attempt == 1 then
-    broadcastUpdateStatus(program, instance, "bootloader", "requesting LAN cache", 28)
-    print("Trying LAN bootloader cache first...")
+    drawBootUpdate("BOOTLOADER", "lan_cache", "requesting LAN cache", program, instance, 28)
+    broadcastUpdateStatus(program, instance, "lan_cache", "requesting LAN cache", 28)
     local lanOk, lanErr = requestBootloaderPayload(url, STARTUP_TMP, program, instance)
     if lanOk then
-      drawBootUpdate("BOOTLOADER", "LAN payload verified", program, instance)
-      broadcastUpdateStatus(program, instance, "bootloader", "LAN payload", 80)
+      drawBootUpdate("BOOTLOADER", "verifying", "LAN payload", program, instance, 80)
+      broadcastUpdateStatus(program, instance, "verifying", "LAN payload", 80)
     else
-      print("LAN cache unavailable: " .. tostring(lanErr))
-      print("Falling back to GitHub...")
-      local usedUrl = downloadFirstUrlTo(urls, STARTUP_TMP)
-      print("Used: " .. tostring(usedUrl))
+      drawBootUpdate("BOOTLOADER", "downloading", "falling back to GitHub", program, instance, 35)
+      broadcastUpdateStatus(program, instance, "downloading", "fallback GitHub", 35)
+      downloadFirstUrlTo(urls, STARTUP_TMP)
+      broadcastUpdateStatus(program, instance, "downloading", "GitHub source", 80)
+      drawBootUpdate("BOOTLOADER", "downloading", "GitHub source", program, instance, 80)
     end
   else
-    local usedUrl = downloadFirstUrlTo(urls, STARTUP_TMP)
-    print("Used: " .. tostring(usedUrl))
+    downloadFirstUrlTo(urls, STARTUP_TMP)
+    drawBootUpdate("BOOTLOADER", "downloading", "GitHub source", program, instance, 80)
+    broadcastUpdateStatus(program, instance, "downloading", "GitHub source", 80)
   end
-  drawBootUpdate("BOOTLOADER", "verifying", program, instance)
+  drawBootUpdate("BOOTLOADER", "verifying", "verified", program, instance, 85)
   verifyBootloader(STARTUP_TMP)
-  broadcastUpdateStatus(program, instance, "bootloader", "verified", 85)
-  drawBootUpdate("BOOTLOADER", "installing", program, instance)
+  broadcastUpdateStatus(program, instance, "verifying", "verified", 85)
+  drawBootUpdate("BOOTLOADER", "installing", "bootloader", program, instance, 92)
+  broadcastUpdateStatus(program, instance, "installing", "bootloader", 92)
   replaceBootloader()
   broadcastUpdateStatus(program, instance, "done", "bootloader installed", 100)
+  drawBootUpdate("BOOTLOADER", "rebooting", "bootloader installed", program, instance, 100)
 end
 
 function retryDelay(attempt)
@@ -703,30 +734,25 @@ function downloadProgram(program, instance)
     local ok, err = pcall(downloadProgramOnce, program, instance, attempt)
     if ok then return true end
     lastErr = err
-    clear()
-    term.setTextColor(colors.red)
-    print("Download attempt " .. tostring(attempt) .. " failed")
-    print(tostring(err))
-    term.setTextColor(colors.white)
     if attempt < 4 then
       local wait = retryDelay(attempt)
+      drawConsoleStatus(program, instance, "retrying", "program attempt " .. tostring(attempt) .. " failed: " .. tostring(err))
+      drawBootUpdate("FIRMWARE", "retrying", "in " .. tostring(wait) .. "s", program, instance, attempt * 20)
       broadcastUpdateStatus(program, instance, "retrying", tostring(wait) .. "s", attempt * 20)
-      print("")
-      print("Retrying in " .. tostring(wait) .. " seconds.")
       sleep(wait)
     end
   end
 
   if fs.exists(PROGRAM_PATH) then
+    drawConsoleStatus(program, instance, "failed", "kept old program")
+    drawBootUpdate("FIRMWARE", "failed", "kept old program", program, instance, 100)
     broadcastUpdateStatus(program, instance, "failed", "kept old program", 100)
-    term.setTextColor(colors.yellow)
-    print("")
-    print("Keeping existing installed program.")
-    term.setTextColor(colors.white)
     sleep(3)
     return false
   end
 
+  drawConsoleStatus(program, instance, "failed", tostring(lastErr or "download failed"))
+  drawBootUpdate("FIRMWARE", "failed", tostring(lastErr or "download failed"), program, instance, 100)
   broadcastUpdateStatus(program, instance, "failed", tostring(lastErr or "download failed"), 100)
   error(lastErr or "download failed; no installed program is available", 0)
 end
@@ -737,20 +763,17 @@ function downloadBootloader(program, instance)
     local ok, err = pcall(downloadBootloaderOnce, program, instance, attempt)
     if ok then return true end
     lastErr = err
-    clear()
-    term.setTextColor(colors.red)
-    print("Bootloader attempt " .. tostring(attempt) .. " failed")
-    print(tostring(err))
-    term.setTextColor(colors.white)
     if attempt < 4 then
       local wait = retryDelay(attempt)
+      drawConsoleStatus(program, instance, "retrying", "bootloader attempt " .. tostring(attempt) .. " failed: " .. tostring(err))
+      drawBootUpdate("BOOTLOADER", "retrying", "in " .. tostring(wait) .. "s", program, instance, attempt * 20)
       broadcastUpdateStatus(program, instance, "retrying", "boot " .. tostring(wait) .. "s", attempt * 20)
-      print("")
-      print("Retrying in " .. tostring(wait) .. " seconds.")
       sleep(wait)
     end
   end
 
+  drawConsoleStatus(program, instance, "failed", "bootloader kept old")
+  drawBootUpdate("BOOTLOADER", "failed", "bootloader kept old", program, instance, 100)
   broadcastUpdateStatus(program, instance, "failed", "bootloader kept old", 100)
   error(lastErr or "bootloader update failed", 0)
 end
@@ -809,16 +832,18 @@ function waitForScheduledUpdate(delay, program, instance, kind)
   delay = math.max(0, math.floor(tonumber(delay) or 0))
   broadcastUpdateStatus(program, instance, "scheduled", "T-" .. tostring(delay) .. "s", 0, { eta = delay })
   if delay <= 0 then return end
+  local title = kind == "bootloader" and "BOOTLOADER UPDATE" or "FIRMWARE UPDATE"
   for remaining = delay, 1, -1 do
-    if kind == "bootloader" then
-      for _, t in ipairs(attachedDisplays()) do
-        clearDisplay(t, colors.white, colors.blue)
-        local _, h = displaySize(t)
-        local mid = math.max(2, math.floor(h / 2) - 1)
-        writeCenter(t, mid, "BOOTLOADER UPDATE", colors.white, colors.blue)
-        writeCenter(t, mid + 2, "RESTART IN " .. tostring(remaining) .. "s", colors.white, colors.blue)
-        writeCenter(t, mid + 4, tostring(instance and instance.name or "device"), colors.lightBlue, colors.blue)
-      end
+    for _, t in ipairs(attachedDisplays()) do
+      clearDisplay(t, colors.white, colors.blue)
+      local w, h = displaySize(t)
+      local mid = math.max(2, math.floor(h / 2) - 1)
+      local progress = delay > 0 and math.floor(((delay - remaining) / delay) * 100) or 0
+      writeCenter(t, mid, title, colors.white, colors.blue)
+      writeCenter(t, mid + 2, "START IN " .. tostring(remaining) .. "s", colors.white, colors.blue)
+      writeCenter(t, mid + 4, tostring(instance and instance.name or "device"), colors.lightBlue, colors.blue)
+      drawBar(t, math.max(1, math.floor(w * 0.15)), mid + 6, math.max(8, math.floor(w * 0.7)), progress, 100, colors.green, colors.gray)
+      writeCenter(t, mid + 7, tostring(math.floor(progress)) .. "%", colors.white, colors.blue)
     end
     broadcastUpdateStatus(program, instance, "scheduled", "T-" .. tostring(remaining) .. "s", 0, { eta = remaining })
     sleep(1)
@@ -958,15 +983,6 @@ while true do
   if updateRequested then
     updatePayload = ensureUpdatePacketMetadata(updateSource, updatePayload)
     clear()
-    term.setTextColor(colors.yellow)
-    print("MCCR update requested")
-    term.setTextColor(colors.white)
-    print("Source: " .. tostring(updateSource or "unknown"))
-    print("Kind: " .. tostring(updateKind or "program"))
-    print("Program: " .. tostring(program.key))
-    print("Instance: " .. tostring(instance.name))
-    print("Current version: " .. tostring(programVersion()))
-    print("")
     updateMeta = {
       updateId = updatePayload and updatePayload.updateId or nil,
       updateKind = updateKind,
@@ -975,39 +991,33 @@ while true do
     }
     local stagger = updateStaggerSeconds(updateSource, instance, updatePayload)
     updateMeta.scheduledDelay = stagger
-    print("Scheduled delay: " .. tostring(stagger) .. " seconds")
+    drawConsoleStatus(program, instance, "starting", tostring(updateKind or "program") .. " update")
     waitForScheduledUpdate(stagger, program, instance, updateKind)
     if stagger > 0 then
-      clear()
-      term.setTextColor(colors.yellow)
-      print("MCCR update requested")
-      term.setTextColor(colors.white)
-      print("Kind: " .. tostring(updateKind or "program"))
-      print("Program: " .. tostring(program.key))
-      print("Instance: " .. tostring(instance.name))
-      print("Current version: " .. tostring(programVersion()))
-      print("")
+      drawConsoleStatus(program, instance, "scheduled", tostring(updateKind or "program") .. " update in " .. tostring(stagger) .. "s")
     end
     if updateKind == "bootloader" then
-      print("Downloading current bootloader...")
-      drawConsoleStatus(program, instance, "bootloader update", "starting")
+      drawConsoleStatus(program, instance, "starting", "bootloader update")
       broadcastUpdateStatus(program, instance, "starting", "bootloader", 10)
-      drawBootUpdate("BOOTLOADER", "starting", program, instance)
+      drawBootUpdate("BOOTLOADER", "starting", "bootloader", program, instance, 10)
       sleep(1)
       downloadBootloader(program, instance)
-      print("Rebooting to new bootloader...")
       drawConsoleStatus(program, instance, "rebooting", "bootloader installed")
-      drawBootUpdate("BOOTLOADER", "rebooting", program, instance)
+      drawBootUpdate("BOOTLOADER", "rebooting", "bootloader installed", program, instance, 100)
       broadcastUpdateStatus(program, instance, "rebooting", "rebooting", 100)
       sleep(1)
       os.reboot()
     else
-      print("Downloading current GitHub version...")
+      drawConsoleStatus(program, instance, "starting", "program update")
+      drawBootUpdate("FIRMWARE", "starting", "download", program, instance, 10)
       broadcastUpdateStatus(program, instance, "starting", "download", 10)
       cfg.forceUpdate = true
       writeTable(BOOT_CONFIG, cfg)
       sleep(1)
       ensureProgram(cfg, program, instance)
+      drawBootUpdate("FIRMWARE", "installed, starting", "program", program, instance, 100)
+      drawConsoleStatus(program, instance, "rebooting", "program installed")
+      sleep(0.5)
     end
   elseif ok then
     sleep(1)

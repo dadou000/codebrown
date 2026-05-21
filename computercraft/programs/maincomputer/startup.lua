@@ -686,13 +686,15 @@ local function run(name, lib)
     tempOffset = 0,
     cycle = 0,
   })
+  -- Runtime-only update state. Never restore across reboot.
+  s.updateStatus = {}
+  s.activeUpdateId = nil
   s.breakers = s.breakers or copyDefaults(lib.devices.breakers)
   for k, v in pairs(lib.devices.breakers) do
     if s.breakers[k] == nil then s.breakers[k] = v end
   end
   s.batteries = s.batteries or { battery400 = 82, pmc1 = 100, pmc2 = 100, pmc3 = 100 }
   s.telemetry = s.telemetry or {}
-  s.updateStatus = s.updateStatus or {}
   s.displayContexts = s.displayContexts or defaultContexts
   for k, v in pairs(defaultContexts) do
     if s.displayContexts[k] == nil then s.displayContexts[k] = v end
@@ -827,13 +829,19 @@ local function run(name, lib)
     return out
   end
 
+  local function hasUpdateRows(t)
+    for _, v in pairs(t or {}) do
+      if type(v) == "table" then return true end
+    end
+    return false
+  end
+
   local function snapshot()
-    return {
+    local snap = {
       buses = s.buses,
       batteries = s.batteries,
       breakers = s.breakers,
       telemetry = telemetrySnapshot(),
-      updateStatus = s.updateStatus,
       peripherals = s.peripherals,
       draconic = s.draconic,
       alert = s.alert,
@@ -843,6 +851,10 @@ local function run(name, lib)
       actions = lib.state.read(actionPath, {}),
       cycle = s.cycle,
     }
+    if hasUpdateRows(s.updateStatus) then
+      snap.updateStatus = s.updateStatus
+    end
+    return snap
   end
 
   local function applyCommand(pkt)
@@ -951,6 +963,25 @@ local function run(name, lib)
     end
   end
 
+  local function telemetryFresh(item)
+    if type(item) ~= "table" then return true end
+    local lastSeen = tonumber(item.lastSeen)
+    if not lastSeen then return true end
+    if lastSeen < 9999999999 then
+      return (os.clock() - lastSeen) <= 30
+    end
+    local now = os.epoch and os.epoch("utc") or os.clock()
+    return (now - lastSeen) <= 30000
+  end
+
+  local function pruneTelemetry()
+    local fresh = {}
+    for name, item in pairs(s.telemetry or {}) do
+      if telemetryFresh(item) then fresh[name] = item end
+    end
+    s.telemetry = fresh
+  end
+
   local function isFinalUpdateStage(stage)
     return stage == "done" or stage == "failed" or stage == "timeout" or stage == "rebooting"
   end
@@ -1004,6 +1035,7 @@ local function run(name, lib)
     local dt = math.max(0.1, now - last)
     last = now
     s.cycle = (s.cycle or 0) + 1
+    pruneTelemetry()
     computeBuses(dt)
 
     while true do
@@ -1014,7 +1046,20 @@ local function run(name, lib)
     pruneUpdateStatus()
 
     draw()
-    lib.state.write(statePath, s)
+    lib.state.write(statePath, {
+      breakers = s.breakers,
+      batteries = s.batteries,
+      telemetry = s.telemetry,
+      peripherals = s.peripherals,
+      buses = s.buses,
+      alert = s.alert,
+      mode = s.mode,
+      displayContexts = s.displayContexts,
+      screenStyle = s.screenStyle,
+      tempOffset = s.tempOffset,
+      cycle = s.cycle,
+      draconic = s.draconic,
+    })
     lib.net.broadcast(name, "snapshot", snapshot())
     sleep(1)
   end

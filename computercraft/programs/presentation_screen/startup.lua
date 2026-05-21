@@ -715,35 +715,48 @@ local function styledClear(t, lib, snap)
   lib.ui.clear(t, style.textColor or colors.white, style.bgColor or colors.black)
 end
 
+local function telemetryFresh(item)
+  if type(item) ~= "table" then return true end
+  local lastSeen = tonumber(item.lastSeen)
+  if not lastSeen then return true end
+  if lastSeen < 9999999999 then
+    return (os.clock() - lastSeen) <= 30
+  end
+  local now = os.epoch and os.epoch("utc") or os.clock()
+  return (now - lastSeen) <= 30000
+end
+
 local function telemetryWithMandatory(snap)
   local src = snap.telemetry or {}
   local out = {}
   for name, item in pairs(src) do
-    out[name] = item
+    if telemetryFresh(item) then out[name] = item end
   end
-  for _, key in ipairs({ "maincomputer", "admin_control_panel" }) do
-    if not out[key] then
-      out[key] = { name = key, label = key == "maincomputer" and "Main Computer" or "Admin Panel", status = "offline", severity = 2 }
-    end
-  end
-  return out
+  return out, not not out.maincomputer
 end
 
 local function drawDeviceList(t, lib, snap, title, matcher)
   local w = lib.ui.size(t)
   lib.ui.center(t, 1, string.upper(title), colors.lightBlue)
   local y = 3
-  for _, item in ipairs(sortedTelemetry(telemetryWithMandatory(snap))) do
+  local items, hasMaincomputer = telemetryWithMandatory(snap)
+  if not hasMaincomputer then
+    lib.ui.writeAt(t, 1, y, "Warning: main computer missing", colors.red)
+    y = y + 1
+  end
+  local matchedAny = false
+  for _, item in ipairs(sortedTelemetry(items)) do
     local name = tostring(item.name or "")
     local label = tostring(item.label or name)
     if not matcher or matcher(name, label, item) then
+      matchedAny = true
       local labelW = math.max(4, math.min(18, w - 9))
       lib.ui.writeAt(t, 1, y, string.format("%-" .. tostring(labelW) .. "s %s", label:sub(1, labelW), tostring(item.status or "unknown")), lib.ui.statusColor(item.severity or 0))
       y = y + 1
       if y > lib.ui.maxRows(t, 1) then break end
     end
   end
-  if y == 3 then lib.ui.writeAt(t, 1, y, "No matching devices", colors.gray) end
+  if not matchedAny then lib.ui.writeAt(t, 1, y, "No matching devices", colors.gray) end
 end
 
 local function fmtEnergy(value)
@@ -1247,6 +1260,10 @@ end
 local function run(name, lib)
   local statePath = "/mccr_state/" .. name .. ".dat"
   local s = lib.state.read(statePath, { snapshot = {}, eval = {}, cycle = 0 })
+  s.updateStatus = {}
+  s.updateUntil = nil
+  s.updateTerminalSince = nil
+  s.showVersionsUntil = nil
   local screen = lib.ui.target(lib.devices.spec(name))
   lib.ui.boot(screen, lib.devices.spec(name).label or name)
   mccrDrawConsoleStatus(name, "running")
@@ -1297,18 +1314,12 @@ local function run(name, lib)
       sleepTick = s.sleepTick,
       localContexts = s.localContexts,
       localStyle = s.localStyle,
-      updateStatus = s.updateStatus,
-      updateUntil = s.updateUntil,
-      showVersionsUntil = s.showVersionsUntil,
-      updateTerminalSince = s.updateTerminalSince,
       graphMode = s.graphMode,
     })
     local function handlePacket(pkt)
       if pkt and pkt.kind == "snapshot" then
         s.snapshot = pkt.payload or s.snapshot
-        if s.snapshot.updateStatus then
-          setUpdateStatus(s, s.snapshot.updateStatus)
-        end
+        setUpdateStatus(s, s.snapshot.updateStatus or {})
         if s.localContexts then
           s.snapshot.displayContexts = s.snapshot.displayContexts or {}
           for k, v in pairs(s.localContexts) do s.snapshot.displayContexts[k] = v end

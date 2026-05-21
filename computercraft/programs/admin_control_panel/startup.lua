@@ -1777,7 +1777,9 @@ local function run(name, lib)
   local function updateStageColor(stage)
     if stage == "done" or stage == "rebooting" then return colors.green end
     if stage == "failed" or stage == "timeout" then return colors.red end
-    if stage == "downloading" or stage == "verifying" or stage == "bootloader" or stage == "starting" then return colors.yellow end
+    if stage == "scheduled" or stage == "countdown" or stage == "queued" or stage == "starting" or stage == "retrying" or stage == "lan_cache" or stage == "downloading" or stage == "verifying" or stage == "installing" or stage == "bootloader" then
+      return colors.yellow
+    end
     return colors.lightBlue
   end
 
