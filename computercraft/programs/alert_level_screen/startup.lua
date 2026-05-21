@@ -977,132 +977,6 @@ local function drawVersions(t, lib, snap, name)
   if h >= 2 then lib.ui.writeAt(t, math.max(1, w - 7), h, "20s", colors.gray) end
 end
 
-local function mccrBootTargetMatches(payload, name)
-  payload = payload or {}
-  local target = payload.target or payload.device
-  if target and target ~= "all" and target ~= name then return false end
-  local program = payload.program
-  if program and program ~= "all" and program ~= "unknown" and program ~= MCCR_PROGRAM then return false end
-  return true
-end
-
-local function mccrChecksum(text)
-  text = tostring(text or "")
-  local sum = 0
-  for i = 1, #text do
-    sum = (sum + string.byte(text, i)) % 1000000007
-  end
-  return sum
-end
-
-local function mccrValidBootloaderText(text)
-  return type(text) == "string"
-    and text:find("MCCR mapped GitHub bootloader", 1, true)
-    and text:find("local PROGRAM_URLS = {", 1, true)
-    and text:find("function chooseMapping", 1, true)
-end
-
-local function mccrInstallBootloaderText(text)
-  if not mccrValidBootloaderText(text) then return false, "invalid bootloader payload" end
-  local tmp, dst, bak = "/startup.lua.tmp", "/startup.lua", "/startup.lua.bak"
-  if fs.exists(tmp) then fs.delete(tmp) end
-  local h = fs.open(tmp, "w")
-  if not h then return false, "cannot write startup tmp" end
-  h.write(text)
-  h.close()
-  local check = fs.open(tmp, "r")
-  local saved = check and check.readAll() or ""
-  if check then check.close() end
-  if not mccrValidBootloaderText(saved) then fs.delete(tmp); return false, "written payload failed validation" end
-  if fs.exists(bak) then fs.delete(bak) end
-  if fs.exists(dst) then fs.move(dst, bak) end
-  local ok, err = pcall(fs.move, tmp, dst)
-  if not ok then
-    if fs.exists(bak) and not fs.exists(dst) then fs.move(bak, dst) end
-    return false, "replace failed: " .. tostring(err)
-  end
-  return true
-end
-
-local function mccrReceiveBootloaderPayload(name, payload, status)
-  if mccrValidBootloaderText(payload.bootloader or payload.text) then return payload.bootloader or payload.text end
-  local payloadId = tostring(payload.payloadId or "")
-  local total = tonumber(payload.chunks or payload.totalChunks or payload.chunkTotal)
-  if payloadId == "" or not total or total < 1 then return nil, "missing bootloader chunks" end
-  local chunks, got = {}, 0
-  local deadline = os.clock() + math.max(18, total * 2)
-  if status then status("bootloader", "waiting payload 0/" .. tostring(total), 30) end
-  while os.clock() < deadline and got < total do
-    local timeout = math.max(0.05, deadline - os.clock())
-    local _, pkt = rednet.receive("mccr.v1", timeout)
-    if type(pkt) == "table" and pkt.system == "mccr" and pkt.kind == "command" then
-      local p = pkt.payload or {}
-      if p.command == "install_bootloader_chunk" and p.payloadId == payloadId and mccrBootTargetMatches(p, name) then
-        local index = tonumber(p.index)
-        if index and index >= 1 and index <= total and type(p.data) == "string" and not chunks[index] then
-          chunks[index] = p.data
-          got = got + 1
-          if status then status("bootloader", "payload " .. tostring(got) .. "/" .. tostring(total), 30 + math.floor((got / total) * 45)) end
-        end
-      end
-    end
-  end
-  if got < total then return nil, "payload timeout " .. tostring(got) .. "/" .. tostring(total) end
-  local parts = {}
-  for i = 1, total do
-    if not chunks[i] then return nil, "missing chunk " .. tostring(i) end
-    parts[i] = chunks[i]
-  end
-  local text = table.concat(parts)
-  local expectedSize = tonumber(payload.size)
-  if expectedSize and #text ~= expectedSize then return nil, "payload size mismatch" end
-  local expectedChecksum = tonumber(payload.checksum)
-  if expectedChecksum and mccrChecksum(text) ~= expectedChecksum then return nil, "payload checksum mismatch" end
-  return text
-end
-
-local function mccrHandleBootloaderInstall(lib, name, payload)
-  payload = payload or {}
-  if payload.command == "install_bootloader_chunk" then return true end
-  if payload.command ~= "install_bootloader" then return false end
-  if payload.confirm ~= true then return true end
-  if not mccrBootTargetMatches(payload, name) then return false end
-  local function status(stage, detail, progress)
-    if lib and lib.net and lib.net.broadcast then
-      lib.net.broadcast(name, "update_status", {
-        device = name,
-        program = MCCR_PROGRAM,
-        stage = stage,
-        detail = detail,
-        progress = progress,
-        currentVersion = MCCR_VERSION,
-        version = MCCR_VERSION,
-        updateId = payload.updateId,
-        updateKind = payload.updateKind or "bootloader",
-        slot = payload.slot,
-        total = payload.total,
-      })
-    end
-  end
-  local delay = math.max(0, math.min(300, tonumber(payload.delay) or 0))
-  if delay > 0 then
-    status("queued", "T-" .. tostring(math.ceil(delay)) .. "s", 0)
-    sleep(delay)
-  end
-  local text, receiveErr = mccrReceiveBootloaderPayload(name, payload, status)
-  if not text then
-    status("failed", tostring(receiveErr), 100)
-    return true
-  end
-  status("bootloader", "validating payload", 82)
-  local ok, err = mccrInstallBootloaderText(text)
-  if ok then
-    status("done", "bootloader installed by firmware", 100)
-  else
-    status("failed", tostring(err), 100)
-  end
-  return true
-end
 local function run(name, lib)
   local statePath = "/mccr_state/" .. name .. ".dat"
   local s = lib.state.read(statePath, { snapshot = {}, eval = {}, cycle = 0 })
@@ -1197,9 +1071,7 @@ local function run(name, lib)
         setUpdateStatus(s, s.updateStatus)
       elseif pkt and pkt.kind == "command" and pkt.payload then
         local p = pkt.payload
-        if mccrHandleBootloaderInstall(lib, name, p) then
-          -- handled by firmware installer
-        elseif p.command == "restore" then
+        if p.command == "restore" then
           s.eval = {}
         elseif p.command == "show_versions" then
           if targetMatches(p.target, name, spec) then

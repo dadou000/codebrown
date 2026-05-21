@@ -728,17 +728,6 @@ function ensureProgram(cfg, program, instance)
   end
 end
 
-function updateSlot(instance)
-  local n = 0
-  for _, item in ipairs(programTypes) do
-    for _, inst in ipairs(item.instances) do
-      n = n + 1
-      if instance and inst.name == instance.name then return n end
-    end
-  end
-  return os.getComputerID and ((os.getComputerID() % 64) + 1) or 1
-end
-
 function updateStaggerSeconds(source, instance, payload)
   payload = payload or {}
   local explicit = tonumber(payload.delay or payload.scheduleDelay or payload.stagger)
