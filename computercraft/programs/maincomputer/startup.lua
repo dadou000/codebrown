@@ -1065,11 +1065,37 @@ local function run(name, lib)
         eta = p.eta,
         ts = p.ts,
         source = pkt.source,
+        lastLocal = os.clock(),
       }
     elseif pkt.kind == "peripherals" then
       s.peripherals[pkt.source or tostring(pkt.id)] = pkt.payload or {}
     elseif pkt.kind == "command" then
       applyCommand(pkt)
+    end
+  end
+
+  local function isFinalUpdateStage(stage)
+    return stage == "done" or stage == "failed" or stage == "timeout" or stage == "rebooting"
+  end
+
+  local function pruneUpdateStatus()
+    local now = os.clock()
+    local any, allFinal = false, true
+    for _, item in pairs(s.updateStatus or {}) do
+      any = true
+      if not isFinalUpdateStage(type(item) == "table" and item.stage or nil) then allFinal = false end
+    end
+    if not any then return end
+    for key, item in pairs(s.updateStatus or {}) do
+      local age = now - (tonumber(item.lastLocal) or now)
+      if allFinal and age > 20 then
+        s.updateStatus[key] = nil
+      elseif (not allFinal) and age > 300 then
+        item.stage = "timeout"
+        item.detail = "supervisor timeout"
+        item.progress = 100
+        item.lastLocal = now
+      end
     end
   end
 
@@ -1105,6 +1131,7 @@ local function run(name, lib)
       if not pkt then break end
       handle(pkt)
     end
+    pruneUpdateStatus()
 
     draw()
     lib.state.write(statePath, s)
@@ -1168,6 +1195,7 @@ local run = load_role_main()
 while true do
   local ok, err = pcall(run, MCCR_NAME, lib)
   if ok then return end
+  if tostring(err) == "local update requested" or tostring(err) == "local bootloader update requested" then return end
 
   local crashPath = "/mccr_state/" .. MCCR_NAME .. "_crash.log"
   lib.state.write(crashPath, {

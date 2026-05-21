@@ -9,6 +9,7 @@ local STARTUP_TMP = "/startup.lua.tmp"
 local STARTUP_BACKUP = "/startup.lua.bak"
 local PROGRAM_PATH = "/mccr_program.lua"
 local PROGRAM_TMP = "/mccr_program.lua.tmp"
+local PROGRAM_BACKUP = "/mccr_program.lua.bak"
 local CRASH_LOG = "/mccr_boot_crash.log"
 local UPDATE_REQUEST = "/mccr_update_request.dat"
 local REDNET_PROTOCOL = "mccr.v1"
@@ -445,9 +446,22 @@ end
 
 function replaceProgram()
   if fs.exists(PROGRAM_TMP) then
-    if fs.exists(PROGRAM_PATH) then fs.delete(PROGRAM_PATH) end
-    fs.move(PROGRAM_TMP, PROGRAM_PATH)
+    if fs.exists(PROGRAM_BACKUP) then fs.delete(PROGRAM_BACKUP) end
+    if fs.exists(PROGRAM_PATH) then fs.move(PROGRAM_PATH, PROGRAM_BACKUP) end
+    local ok, err = pcall(fs.move, PROGRAM_TMP, PROGRAM_PATH)
+    if not ok then
+      if fs.exists(PROGRAM_BACKUP) and not fs.exists(PROGRAM_PATH) then fs.move(PROGRAM_BACKUP, PROGRAM_PATH) end
+      error("program replace failed: " .. tostring(err), 0)
+    end
   end
+end
+
+function restoreProgramBackup(reason)
+  if not fs.exists(PROGRAM_BACKUP) then return false end
+  if fs.exists(PROGRAM_PATH) then fs.delete(PROGRAM_PATH) end
+  fs.move(PROGRAM_BACKUP, PROGRAM_PATH)
+  appendCrash("rolled back program: " .. tostring(reason or "instant crash"))
+  return true
 end
 
 function downloadUrlTo(url, path)
@@ -729,13 +743,58 @@ function updateStaggerSeconds(source, instance, payload)
   payload = payload or {}
   local explicit = tonumber(payload.delay or payload.scheduleDelay or payload.stagger)
   if explicit then return math.max(0, math.min(600, explicit)) end
-  if source ~= "remote" then return 0 end
-  return (updateSlot(instance) - 1) * 0.5
+  return 0
+end
+
+function isLocalUpdateEscape(err)
+  local text = tostring(err)
+  return text == "local update requested" or text == "local bootloader update requested"
 end
 
 function runProgram()
-  if shell.execute then return shell.execute(PROGRAM_PATH) end
-  return shell.run(PROGRAM_PATH)
+  local started = os.clock()
+  local fn, loadErr = loadfile(PROGRAM_PATH)
+  if not fn then error(loadErr, 0) end
+  local ok, err = pcall(fn)
+  if not ok then
+    if isLocalUpdateEscape(err) then return nil, err end
+    if os.clock() - started < 10 and restoreProgramBackup("instant crash: " .. tostring(err)) then
+      broadcastUpdateStatus(nil, nil, "failed", "rolled back after instant crash", 100)
+    end
+    error(err, 0)
+  end
+  return err
+end
+
+function ensureUpdatePacketMetadata(source, payload)
+  payload = payload or {}
+  if not payload.updateId then
+    local id = os.getComputerID and os.getComputerID() or 0
+    payload.updateId = tostring(source or "local") .. "-" .. tostring(id) .. "-" .. tostring(math.floor(os.clock() * 1000))
+  end
+  payload.slot = tonumber(payload.slot) or 1
+  payload.total = tonumber(payload.total) or 1
+  return payload
+end
+
+function waitForScheduledUpdate(delay, program, instance, kind)
+  delay = math.max(0, math.floor(tonumber(delay) or 0))
+  broadcastUpdateStatus(program, instance, "scheduled", "T-" .. tostring(delay) .. "s", 0, { eta = delay })
+  if delay <= 0 then return end
+  for remaining = delay, 1, -1 do
+    if kind == "bootloader" then
+      for _, t in ipairs(attachedDisplays()) do
+        clearDisplay(t, colors.white, colors.blue)
+        local _, h = displaySize(t)
+        local mid = math.max(2, math.floor(h / 2) - 1)
+        writeCenter(t, mid, "BOOTLOADER UPDATE", colors.white, colors.blue)
+        writeCenter(t, mid + 2, "RESTART IN " .. tostring(remaining) .. "s", colors.white, colors.blue)
+        writeCenter(t, mid + 4, tostring(instance and instance.name or "device"), colors.lightBlue, colors.blue)
+      end
+    end
+    broadcastUpdateStatus(program, instance, "scheduled", "T-" .. tostring(remaining) .. "s", 0, { eta = remaining })
+    sleep(1)
+  end
 end
 
 function currentEpoch()
@@ -750,6 +809,7 @@ function validUpdateCommand(command)
     or command == "update"
     or command == "update_bootloader"
     or command == "bootloader_update"
+    or command == "install_bootloader"
 end
 
 function isUpdatePacket(pkt, program, instance)
@@ -770,7 +830,8 @@ function isUpdatePacket(pkt, program, instance)
   end
   if target and target ~= "all" and target ~= instance.name then return false end
   if targetProgram and targetProgram ~= "all" and targetProgram ~= program.key then return false end
-  if command == "update_bootloader" or command == "bootloader_update" then return "bootloader" end
+  if not payload.updateId or not payload.slot or not payload.total then return false end
+  if command == "update_bootloader" or command == "bootloader_update" or command == "install_bootloader" then return "bootloader" end
   return "program"
 end
 
@@ -867,6 +928,7 @@ while true do
   end
 
   if updateRequested then
+    updatePayload = ensureUpdatePacketMetadata(updateSource, updatePayload)
     clear()
     term.setTextColor(colors.yellow)
     print("MCCR update requested")
@@ -885,14 +947,9 @@ while true do
     }
     local stagger = updateStaggerSeconds(updateSource, instance, updatePayload)
     updateMeta.scheduledDelay = stagger
+    print("Scheduled delay: " .. tostring(stagger) .. " seconds")
+    waitForScheduledUpdate(stagger, program, instance, updateKind)
     if stagger > 0 then
-      print("Remote fleet update stagger: " .. tostring(stagger) .. " seconds")
-      broadcastUpdateStatus(program, instance, "scheduled", tostring(stagger) .. "s", 3, { eta = stagger })
-      if updateKind == "bootloader" then
-        drawBootCountdown(stagger, program, instance)
-      else
-        sleep(stagger)
-      end
       clear()
       term.setTextColor(colors.yellow)
       print("MCCR update requested")

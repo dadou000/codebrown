@@ -1279,6 +1279,7 @@ local run = load_role_display()
 while true do
   local ok, err = pcall(run, MCCR_NAME, lib)
   if ok then return end
+  if tostring(err) == "local update requested" or tostring(err) == "local bootloader update requested" then return end
 
   local crashPath = "/mccr_state/" .. MCCR_NAME .. "_crash.log"
   lib.state.write(crashPath, {

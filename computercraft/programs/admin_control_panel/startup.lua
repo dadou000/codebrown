@@ -16,6 +16,7 @@ local STARTUP_TMP = "/startup.lua.tmp"
 local STARTUP_BACKUP = "/startup.lua.bak"
 local PROGRAM_PATH = "/mccr_program.lua"
 local PROGRAM_TMP = "/mccr_program.lua.tmp"
+local PROGRAM_BACKUP = "/mccr_program.lua.bak"
 local CRASH_LOG = "/mccr_boot_crash.log"
 local UPDATE_REQUEST = "/mccr_update_request.dat"
 local REDNET_PROTOCOL = "mccr.v1"
@@ -452,9 +453,22 @@ end
 
 function replaceProgram()
   if fs.exists(PROGRAM_TMP) then
-    if fs.exists(PROGRAM_PATH) then fs.delete(PROGRAM_PATH) end
-    fs.move(PROGRAM_TMP, PROGRAM_PATH)
+    if fs.exists(PROGRAM_BACKUP) then fs.delete(PROGRAM_BACKUP) end
+    if fs.exists(PROGRAM_PATH) then fs.move(PROGRAM_PATH, PROGRAM_BACKUP) end
+    local ok, err = pcall(fs.move, PROGRAM_TMP, PROGRAM_PATH)
+    if not ok then
+      if fs.exists(PROGRAM_BACKUP) and not fs.exists(PROGRAM_PATH) then fs.move(PROGRAM_BACKUP, PROGRAM_PATH) end
+      error("program replace failed: " .. tostring(err), 0)
+    end
   end
+end
+
+function restoreProgramBackup(reason)
+  if not fs.exists(PROGRAM_BACKUP) then return false end
+  if fs.exists(PROGRAM_PATH) then fs.delete(PROGRAM_PATH) end
+  fs.move(PROGRAM_BACKUP, PROGRAM_PATH)
+  appendCrash("rolled back program: " .. tostring(reason or "instant crash"))
+  return true
 end
 
 function downloadUrlTo(url, path)
@@ -736,13 +750,58 @@ function updateStaggerSeconds(source, instance, payload)
   payload = payload or {}
   local explicit = tonumber(payload.delay or payload.scheduleDelay or payload.stagger)
   if explicit then return math.max(0, math.min(600, explicit)) end
-  if source ~= "remote" then return 0 end
-  return (updateSlot(instance) - 1) * 0.5
+  return 0
+end
+
+function isLocalUpdateEscape(err)
+  local text = tostring(err)
+  return text == "local update requested" or text == "local bootloader update requested"
 end
 
 function runProgram()
-  if shell.execute then return shell.execute(PROGRAM_PATH) end
-  return shell.run(PROGRAM_PATH)
+  local started = os.clock()
+  local fn, loadErr = loadfile(PROGRAM_PATH)
+  if not fn then error(loadErr, 0) end
+  local ok, err = pcall(fn)
+  if not ok then
+    if isLocalUpdateEscape(err) then return nil, err end
+    if os.clock() - started < 10 and restoreProgramBackup("instant crash: " .. tostring(err)) then
+      broadcastUpdateStatus(nil, nil, "failed", "rolled back after instant crash", 100)
+    end
+    error(err, 0)
+  end
+  return err
+end
+
+function ensureUpdatePacketMetadata(source, payload)
+  payload = payload or {}
+  if not payload.updateId then
+    local id = os.getComputerID and os.getComputerID() or 0
+    payload.updateId = tostring(source or "local") .. "-" .. tostring(id) .. "-" .. tostring(math.floor(os.clock() * 1000))
+  end
+  payload.slot = tonumber(payload.slot) or 1
+  payload.total = tonumber(payload.total) or 1
+  return payload
+end
+
+function waitForScheduledUpdate(delay, program, instance, kind)
+  delay = math.max(0, math.floor(tonumber(delay) or 0))
+  broadcastUpdateStatus(program, instance, "scheduled", "T-" .. tostring(delay) .. "s", 0, { eta = delay })
+  if delay <= 0 then return end
+  for remaining = delay, 1, -1 do
+    if kind == "bootloader" then
+      for _, t in ipairs(attachedDisplays()) do
+        clearDisplay(t, colors.white, colors.blue)
+        local _, h = displaySize(t)
+        local mid = math.max(2, math.floor(h / 2) - 1)
+        writeCenter(t, mid, "BOOTLOADER UPDATE", colors.white, colors.blue)
+        writeCenter(t, mid + 2, "RESTART IN " .. tostring(remaining) .. "s", colors.white, colors.blue)
+        writeCenter(t, mid + 4, tostring(instance and instance.name or "device"), colors.lightBlue, colors.blue)
+      end
+    end
+    broadcastUpdateStatus(program, instance, "scheduled", "T-" .. tostring(remaining) .. "s", 0, { eta = remaining })
+    sleep(1)
+  end
 end
 
 function currentEpoch()
@@ -757,6 +816,7 @@ function validUpdateCommand(command)
     or command == "update"
     or command == "update_bootloader"
     or command == "bootloader_update"
+    or command == "install_bootloader"
 end
 
 function isUpdatePacket(pkt, program, instance)
@@ -777,7 +837,8 @@ function isUpdatePacket(pkt, program, instance)
   end
   if target and target ~= "all" and target ~= instance.name then return false end
   if targetProgram and targetProgram ~= "all" and targetProgram ~= program.key then return false end
-  if command == "update_bootloader" or command == "bootloader_update" then return "bootloader" end
+  if not payload.updateId or not payload.slot or not payload.total then return false end
+  if command == "update_bootloader" or command == "bootloader_update" or command == "install_bootloader" then return "bootloader" end
   return "program"
 end
 
@@ -874,6 +935,7 @@ while true do
   end
 
   if updateRequested then
+    updatePayload = ensureUpdatePacketMetadata(updateSource, updatePayload)
     clear()
     term.setTextColor(colors.yellow)
     print("MCCR update requested")
@@ -892,14 +954,9 @@ while true do
     }
     local stagger = updateStaggerSeconds(updateSource, instance, updatePayload)
     updateMeta.scheduledDelay = stagger
+    print("Scheduled delay: " .. tostring(stagger) .. " seconds")
+    waitForScheduledUpdate(stagger, program, instance, updateKind)
     if stagger > 0 then
-      print("Remote fleet update stagger: " .. tostring(stagger) .. " seconds")
-      broadcastUpdateStatus(program, instance, "scheduled", tostring(stagger) .. "s", 3, { eta = stagger })
-      if updateKind == "bootloader" then
-        drawBootCountdown(stagger, program, instance)
-      else
-        sleep(stagger)
-      end
       clear()
       term.setTextColor(colors.yellow)
       print("MCCR update requested")
@@ -947,7 +1004,6 @@ while true do
     end
   end
 end
-
 ]====]
 local MCCR_ALLOWED_NAMES = {
   "admin_control_panel",
@@ -1694,7 +1750,14 @@ local function mccrHandleBootloaderInstall(lib, name, payload)
 end
 local function run(name, lib)
   local statePath = "/mccr_state/" .. name .. ".dat"
+  local updatePlanPath = "/mccr_state/update_plan.dat"
   local s = lib.state.read(statePath, { tab = 1, snapshot = {}, eval = {}, powerGroup = "control", target = "main_presentation_screen", textColor = colors.white, bgColor = colors.black, theme = "default", updateStatus = {} })
+  local persistedPlan = lib.state.read(updatePlanPath, nil)
+  if type(persistedPlan) == "table" and persistedPlan.id and persistedPlan.targets then
+    s.updatePlan = persistedPlan
+    s.updateStatus = s.updateStatus or {}
+    for dev, target in pairs(persistedPlan.targets) do s.updateStatus[dev] = s.updateStatus[dev] or target end
+  end
   s.pendingBreakers = s.pendingBreakers or {}
   local screen = lib.ui.target(lib.devices.spec(name))
   lib.ui.boot(screen, lib.devices.spec(name).label or name)
@@ -1758,36 +1821,6 @@ local function run(name, lib)
     }
   end
 
-  local function updateExpected()
-    local out = {}
-    if s.updatePlan and s.updatePlan.targets then
-      for dev in pairs(s.updatePlan.targets) do out[dev] = true end
-    else
-      for dev in pairs(s.updateStatus or {}) do
-        if dev ~= name then out[dev] = true end
-      end
-    end
-    local count = 0
-    for _ in pairs(out) do count = count + 1 end
-    return out, math.max(1, count)
-  end
-
-  local function updateProgress()
-    local expected, total = updateExpected()
-    local sum, done, failed, seen = 0, 0, 0, 0
-    for dev in pairs(expected) do
-      local item = (s.updateStatus or {})[dev] or (s.updatePlan and s.updatePlan.targets and s.updatePlan.targets[dev])
-      if item then
-        seen = seen + 1
-        local p = tonumber(item.progress) or 0
-        if item.stage == "done" or item.stage == "rebooting" then p = 100; done = done + 1 end
-        if item.stage == "failed" or item.stage == "timeout" then p = 100; failed = failed + 1 end
-        sum = sum + math.max(0, math.min(100, p))
-      end
-    end
-    return math.floor(sum / total), done, failed, seen, total
-  end
-
   local function nowMs()
     return os.epoch and os.epoch("utc") or math.floor(os.clock() * 1000)
   end
@@ -1827,25 +1860,73 @@ local function run(name, lib)
     return colors.lightBlue
   end
 
+  local function isFinalUpdateStage(stage)
+    return stage == "done" or stage == "failed" or stage == "timeout" or stage == "rebooting"
+  end
+
+  local function saveUpdatePlan()
+    if s.updatePlan and s.updatePlan.id then
+      lib.state.write(updatePlanPath, s.updatePlan)
+    elseif fs.exists(updatePlanPath) then
+      fs.delete(updatePlanPath)
+    end
+  end
+
+  local function updateExpected()
+    local out = {}
+    if s.updatePlan and s.updatePlan.targets then
+      for dev in pairs(s.updatePlan.targets) do out[dev] = true end
+    end
+    local count = 0
+    for _ in pairs(out) do count = count + 1 end
+    return out, math.max(1, count)
+  end
+
+  local function smoothProgress(item)
+    local raw = tonumber(item.progress) or 0
+    if isFinalUpdateStage(item.stage) then raw = 100 end
+    item.displayProgress = tonumber(item.displayProgress) or raw
+    local delta = raw - item.displayProgress
+    if math.abs(delta) <= 1 then
+      item.displayProgress = raw
+    else
+      item.displayProgress = item.displayProgress + math.max(-8, math.min(8, delta * 0.35))
+    end
+    return math.max(0, math.min(100, item.displayProgress))
+  end
+
+  local function updateProgress()
+    local expected, total = updateExpected()
+    local sum, done, failed, seen = 0, 0, 0, 0
+    for dev in pairs(expected) do
+      local item = s.updatePlan and s.updatePlan.targets and s.updatePlan.targets[dev]
+      if item then
+        seen = seen + 1
+        if item.stage == "done" or item.stage == "rebooting" then done = done + 1 end
+        if item.stage == "failed" or item.stage == "timeout" then failed = failed + 1 end
+        sum = sum + smoothProgress(item)
+      end
+    end
+    return math.floor(sum / total), done, failed, seen, total
+  end
+
   local function refreshUpdatePlan()
     if not s.updatePlan or not s.updatePlan.targets then return end
     local now = os.clock()
+    s.updatePlan.phase = s.updatePlan.phase or "active"
     local allFinished = true
     for dev, target in pairs(s.updatePlan.targets) do
-      local status = (s.updateStatus or {})[dev]
-      if status then
-        target.stage = status.stage or target.stage
-        target.detail = status.detail or target.detail
-        target.progress = status.progress or target.progress
-        target.lastStatus = now
-      end
-      if target.stage ~= "done" and target.stage ~= "failed" and target.stage ~= "rebooting" and target.stage ~= "timeout" then
+      if not isFinalUpdateStage(target.stage) then
         allFinished = false
-        if now > (target.scheduledAt or s.updatePlan.startedAt or now) + 25 and not target.lastStatus then
+        if now > (s.updatePlan.startedAt or now) + 300 then
+          target.stage = "timeout"
+          target.detail = "global timeout"
+          target.progress = 100
+        elseif now > (target.scheduledAt or s.updatePlan.startedAt or now) + 180 and not target.lastStatus then
           target.stage = "timeout"
           target.detail = "no response"
           target.progress = 100
-        elseif target.lastStatus and now - target.lastStatus > 90 then
+        elseif target.lastStatus and now - target.lastStatus > 120 then
           target.stage = "timeout"
           target.detail = "status lost"
           target.progress = 100
@@ -1856,7 +1937,25 @@ local function run(name, lib)
         end
       end
     end
-    if allFinished then s.updateUntil = math.min(s.updateUntil or os.clock() + 8, os.clock() + 8) end
+    if allFinished and s.updatePlan.phase == "active" then
+      s.updatePlan.phase = "summary"
+      s.updatePlan.summaryUntil = now + 12
+    elseif s.updatePlan.phase == "summary" and now >= (s.updatePlan.summaryUntil or now) then
+      s.updatePlan = nil
+      s.updateStatus = {}
+      s.updateUntil = nil
+    elseif s.updateUntil and now > s.updateUntil then
+      for _, target in pairs(s.updatePlan.targets or {}) do
+        if not isFinalUpdateStage(target.stage) then
+          target.stage = "timeout"
+          target.detail = "admin timeout"
+          target.progress = 100
+        end
+      end
+      s.updatePlan.phase = "summary"
+      s.updatePlan.summaryUntil = now + 12
+    end
+    saveUpdatePlan()
   end
 
   local function updateFinished()
@@ -1864,18 +1963,16 @@ local function run(name, lib)
     local any = false
     for _, target in pairs(s.updatePlan.targets) do
       any = true
-      local stage = target.stage
-      if stage ~= "done" and stage ~= "failed" and stage ~= "rebooting" and stage ~= "timeout" then
-        return false
-      end
+      if not isFinalUpdateStage(target.stage) then return false end
     end
     return any
   end
 
   local function publishUpdateState()
-    if not (s.updateUntil and os.clock() < s.updateUntil) then return end
+    if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
     refreshUpdatePlan()
-    local rows = s.updatePlan and s.updatePlan.targets or s.updateStatus or {}
+    if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
+    local rows = s.updatePlan.targets
     for _, item in pairs(rows) do
       if type(item) == "table" and item.device then
         lib.net.broadcast(name, "update_status", {
@@ -1886,8 +1983,8 @@ local function run(name, lib)
           progress = item.progress,
           version = item.version or item.currentVersion,
           currentVersion = item.currentVersion or item.version,
-          updateId = s.updatePlan and s.updatePlan.id or item.updateId,
-          updateKind = s.updatePlan and s.updatePlan.kind or item.updateKind,
+          updateId = s.updatePlan.id,
+          updateKind = s.updatePlan.kind,
           slot = item.slot,
           total = item.total,
           eta = item.eta,
@@ -1999,29 +2096,32 @@ local function run(name, lib)
       s.updateStatus = { none = { device = "none", stage = "failed", detail = "no live devices", progress = 100 } }
       s.updatePlan = nil
       s.updateUntil = os.clock() + 20
+      saveUpdatePlan()
       return
     end
 
     local updateId = tostring(os.getComputerID()) .. "-" .. tostring(math.floor(os.clock() * 1000))
-    local command = kind == "bootloader" and "install_bootloader" or "update_program"
+    local command = kind == "bootloader" and "update_bootloader" or "update_program"
     local baseDelay = kind == "bootloader" and 0 or 1
-    local stepDelay = kind == "bootloader" and 0 or 0.5
+    local stepDelay = 0.5
     local bootText = kind == "bootloader" and bootloaderPayload() or nil
     if kind == "bootloader" and not mccrValidBootloaderText(bootText) then
       s.updateStatus = { admin_control_panel = { device = "admin_control_panel", stage = "failed", detail = "no valid embedded bootloader", progress = 100 } }
       s.updatePlan = nil
       s.updateUntil = os.clock() + 20
+      saveUpdatePlan()
       return
     end
     s.updateStatus = {}
     s.updatePlan = {
       id = updateId,
       kind = kind,
+      phase = "active",
       startedAt = os.clock(),
       targets = {},
       count = #targets,
     }
-    s.updateUntil = os.clock() + math.max(180, baseDelay + (#targets * stepDelay) + 120)
+    s.updateUntil = os.clock() + 300
 
     for i, target in ipairs(targets) do
       local delay = baseDelay + ((i - 1) * stepDelay)
@@ -2037,22 +2137,19 @@ local function run(name, lib)
         scheduledAt = os.clock() + delay,
       }
       s.updateStatus[target.device] = s.updatePlan.targets[target.device]
-      if kind == "bootloader" then
-        sendBootloaderInstall(target, bootText, updateId, i, #targets)
-      else
-        send({
-          command = command,
-          target = target.device,
-          program = target.program ~= "unknown" and target.program or "all",
-          confirm = true,
-          updateId = updateId,
-          updateKind = kind,
-          delay = delay,
-          slot = i,
-          total = #targets,
-        }, 3)
-      end
+      send({
+        command = command,
+        target = target.device,
+        program = target.program ~= "unknown" and target.program or "all",
+        confirm = true,
+        updateId = updateId,
+        updateKind = kind,
+        delay = delay,
+        slot = i,
+        total = #targets,
+      }, 3)
     end
+    saveUpdatePlan()
   end
 
   local function pendingBreaker(k)
@@ -2118,10 +2215,11 @@ local function run(name, lib)
 
   local function drawUpdatePanel(y, w, h)
     refreshUpdatePlan()
-    if not (s.updateUntil and os.clock() < s.updateUntil) then return end
+    if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
     local pct, done, failed, seen, total = updateProgress()
     local kind = (s.updatePlan and s.updatePlan.kind) or "update"
-    lib.ui.writeAt(screen, 1, y, string.format("%s %d%%  %d/%d seen  done %d  fail %d", string.upper(kind), pct, seen, total, done, failed), failed > 0 and colors.red or colors.yellow)
+    local phase = s.updatePlan.phase == "summary" and "SUMMARY" or "ACTIVE"
+    lib.ui.writeAt(screen, 1, y, string.format("%s %s %d%%  %d/%d seen  done %d  fail %d", string.upper(kind), phase, pct, seen, total, done, failed), failed > 0 and colors.red or colors.yellow)
     lib.ui.bar(screen, 1, y + 1, math.max(8, w - 2), pct, 100, failed > 0 and colors.red or colors.green)
     y = y + 3
 
@@ -2140,7 +2238,7 @@ local function run(name, lib)
       if item.detail then text = text .. " " .. tostring(item.detail) end
       lib.ui.writeAt(screen, 1, y, text, updateStageColor(item.stage))
       if item.progress then
-        lib.ui.bar(screen, math.max(1, math.floor(w * 0.68)), y, math.max(5, math.floor(w * 0.30)), math.max(0, math.min(100, tonumber(item.progress) or 0)), 100, updateStageColor(item.stage))
+        lib.ui.bar(screen, math.max(1, math.floor(w * 0.68)), y, math.max(5, math.floor(w * 0.30)), math.max(0, math.min(100, tonumber(item.displayProgress or item.progress) or 0)), 100, updateStageColor(item.stage))
       end
       y = y + 1
     end
@@ -2283,24 +2381,15 @@ local function run(name, lib)
     elseif id == "update_all" then
       scheduleFleetUpdate("program")
     elseif id == "update_self" then
-      lib.state.write("/mccr_update_request.dat", { command = "update_program", source = name, localOnly = true, time = os.clock(), epoch = os.epoch and os.epoch("utc") or nil })
+      local updateId = tostring(os.getComputerID()) .. "-self-" .. tostring(math.floor(os.clock() * 1000))
+      lib.state.write("/mccr_update_request.dat", { command = "update_program", source = name, localOnly = true, updateId = updateId, updateKind = "program", slot = 1, total = 1, delay = 0, time = os.clock(), epoch = os.epoch and os.epoch("utc") or nil })
       error("local update requested", 0)
     elseif id == "boot_all" then
       scheduleFleetUpdate("bootloader")
     elseif id == "boot_self" then
-      local text = bootloaderPayload()
-      local ok, err = mccrInstallBootloaderText(text)
-      s.updateStatus = {
-        [name] = {
-          device = name,
-          program = MCCR_PROGRAM,
-          stage = ok and "done" or "failed",
-          detail = ok and "bootloader installed locally" or tostring(err),
-          progress = 100,
-          updateKind = "bootloader",
-        },
-      }
-      s.updateUntil = os.clock() + 12
+      local updateId = tostring(os.getComputerID()) .. "-boot-" .. tostring(math.floor(os.clock() * 1000))
+      lib.state.write("/mccr_update_request.dat", { command = "update_bootloader", source = name, localOnly = true, updateId = updateId, updateKind = "bootloader", slot = 1, total = 1, delay = 0, time = os.clock(), epoch = os.epoch and os.epoch("utc") or nil })
+      error("local bootloader update requested", 0)
     elseif id == "show_versions" then
       send({ command = "show_versions", target = "all", duration = 20 }, 3)
     end
@@ -2324,34 +2413,29 @@ local function run(name, lib)
           serveBootloaderPayload(pkt.payload)
         elseif type(pkt) == "table" and pkt.system == "mccr" and pkt.kind == "update_status" and pkt.payload then
           local p = pkt.payload
-          local key = tostring(p.device or pkt.source or pkt.id or "unknown")
-          s.updateStatus = s.updateStatus or {}
-          if s.updatePlan and s.updatePlan.id and p.updateId and p.updateId ~= s.updatePlan.id then
-            -- Ignore stale statuses from a previous fleet update while a planned update is active.
-          else
-          s.updateStatus[key] = {
-            device = p.device or key,
-            program = p.program,
-            stage = p.stage,
-            detail = p.detail,
-            progress = p.progress,
-            version = p.version or p.currentVersion,
-            currentVersion = p.currentVersion or p.version,
-            updateId = p.updateId,
-            updateKind = p.updateKind,
-            slot = p.slot,
-            total = p.total,
-            eta = p.eta,
-            ts = p.ts,
-          }
-            if s.updatePlan and s.updatePlan.targets and s.updatePlan.targets[key] then
+          if s.updatePlan and s.updatePlan.id and p.updateId == s.updatePlan.id and p.slot and p.total then
+            local key = tostring(p.device or pkt.source or pkt.id or "unknown")
+            if s.updatePlan.targets and s.updatePlan.targets[key] then
+              s.updateStatus = s.updateStatus or {}
+              s.updateStatus[key] = {
+                device = p.device or key,
+                program = p.program,
+                stage = p.stage,
+                detail = p.detail,
+                progress = p.progress,
+                version = p.version or p.currentVersion,
+                currentVersion = p.currentVersion or p.version,
+                updateId = p.updateId,
+                updateKind = p.updateKind,
+                slot = p.slot,
+                total = p.total,
+                eta = p.eta,
+                ts = p.ts,
+              }
               for k, v in pairs(s.updateStatus[key]) do s.updatePlan.targets[key][k] = v end
               s.updatePlan.targets[key].lastStatus = os.clock()
-            end
-            if updateFinished() then
-              s.updateUntil = os.clock() + 8
-            else
-              s.updateUntil = os.clock() + 90
+              refreshUpdatePlan()
+              saveUpdatePlan()
             end
           end
         end
@@ -2420,6 +2504,7 @@ local run = load_role_admin()
 while true do
   local ok, err = pcall(run, MCCR_NAME, lib)
   if ok then return end
+  if tostring(err) == "local update requested" or tostring(err) == "local bootloader update requested" then return end
 
   local crashPath = "/mccr_state/" .. MCCR_NAME .. "_crash.log"
   lib.state.write(crashPath, {
