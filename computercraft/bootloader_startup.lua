@@ -511,6 +511,15 @@ function verifyBootloader(path)
     fs.delete(path)
     error("downloaded bootloader is incomplete", 0)
   end
+
+  local loader = loadstring or load
+  if type(loader) == "function" then
+    local fn, syntaxErr = loader(text, "@startup.lua")
+    if not fn then
+      fs.delete(path)
+      error("downloaded bootloader syntax error: " .. tostring(syntaxErr), 0)
+    end
+  end
 end
 
 function replaceProgram()
@@ -614,7 +623,7 @@ function requestBootloaderPayload(url, path, program, instance)
 
   local chunks = {}
   local total = nil
-  local deadline = os.clock() + 12
+  local deadline = os.clock() + 30
   while os.clock() < deadline do
     local timeout = math.max(0.05, deadline - os.clock())
     local _, pkt = rednet.receive(REDNET_PROTOCOL, timeout)

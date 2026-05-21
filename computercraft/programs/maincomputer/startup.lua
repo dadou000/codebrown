@@ -677,7 +677,6 @@ local function run(name, lib)
     batteries = { battery400 = 82, pmc1 = 100, pmc2 = 100, pmc3 = 100 },
     telemetry = {},
     peripherals = {},
-    updateStatus = {},
     buses = {},
     alert = { level = 0, reason = "nominal" },
     mode = "normal",

@@ -487,6 +487,15 @@ function verifyBootloader(path)
     fs.delete(path)
     error("downloaded bootloader is incomplete", 0)
   end
+
+  local loader = loadstring or load
+  if type(loader) == "function" then
+    local fn, syntaxErr = loader(text, "@startup.lua")
+    if not fn then
+      fs.delete(path)
+      error("downloaded bootloader syntax error: " .. tostring(syntaxErr), 0)
+    end
+  end
 end
 
 function replaceProgram()
@@ -590,7 +599,7 @@ function requestBootloaderPayload(url, path, program, instance)
 
   local chunks = {}
   local total = nil
-  local deadline = os.clock() + 12
+  local deadline = os.clock() + 30
   while os.clock() < deadline do
     local timeout = math.max(0.05, deadline - os.clock())
     local _, pkt = rednet.receive(REDNET_PROTOCOL, timeout)
@@ -666,33 +675,40 @@ function downloadBootloaderOnce(program, instance, attempt)
   local urls = bootloaderUrls()
   local url = urls[1]
   clear()
-  drawBootUpdate("BOOTLOADER", "download attempt " .. tostring(attempt or 1), program, instance)
-  broadcastUpdateStatus(program, instance, "bootloader", "attempt " .. tostring(attempt or 1), 25)
+  drawBootUpdate("BOOTLOADER", "starting", program, instance)
+  broadcastUpdateStatus(program, instance, "starting", "bootloader attempt " .. tostring(attempt or 1), 10)
   print("Downloading MCCR bootloader...")
   print("Instance: " .. instance.name)
   print("Source: " .. tostring(url))
 
   if attempt == 1 then
-    broadcastUpdateStatus(program, instance, "bootloader", "requesting LAN cache", 28)
+    drawBootUpdate("BOOTLOADER", "lan_cache", program, instance)
+    broadcastUpdateStatus(program, instance, "lan_cache", "requesting LAN cache", 28)
     print("Trying LAN bootloader cache first...")
     local lanOk, lanErr = requestBootloaderPayload(url, STARTUP_TMP, program, instance)
     if lanOk then
-      drawBootUpdate("BOOTLOADER", "LAN payload verified", program, instance)
-      broadcastUpdateStatus(program, instance, "bootloader", "LAN payload", 80)
+      drawBootUpdate("BOOTLOADER", "verifying LAN payload", program, instance)
+      broadcastUpdateStatus(program, instance, "verifying", "LAN payload", 80)
     else
+      drawBootUpdate("BOOTLOADER", "downloading", program, instance)
+      broadcastUpdateStatus(program, instance, "downloading", "fallback GitHub", 35)
       print("LAN cache unavailable: " .. tostring(lanErr))
       print("Falling back to GitHub...")
       local usedUrl = downloadFirstUrlTo(urls, STARTUP_TMP)
       print("Used: " .. tostring(usedUrl))
+      broadcastUpdateStatus(program, instance, "downloading", "GitHub source", 80)
     end
   else
+    drawBootUpdate("BOOTLOADER", "downloading", program, instance)
     local usedUrl = downloadFirstUrlTo(urls, STARTUP_TMP)
     print("Used: " .. tostring(usedUrl))
+    broadcastUpdateStatus(program, instance, "downloading", "GitHub source", 80)
   end
   drawBootUpdate("BOOTLOADER", "verifying", program, instance)
   verifyBootloader(STARTUP_TMP)
-  broadcastUpdateStatus(program, instance, "bootloader", "verified", 85)
+  broadcastUpdateStatus(program, instance, "verifying", "verified", 85)
   drawBootUpdate("BOOTLOADER", "installing", program, instance)
+  broadcastUpdateStatus(program, instance, "installing", "bootloader", 92)
   replaceBootloader()
   broadcastUpdateStatus(program, instance, "done", "bootloader installed", 100)
 end
@@ -1653,10 +1669,16 @@ local themes = {
 local soundChannels = { "fans", "ac", "warning", "alarm", "off" }
 
 local function mccrValidBootloaderText(text)
-  return type(text) == "string"
-    and text:find("MCCR mapped GitHub bootloader", 1, true)
-    and text:find("local PROGRAM_URLS = {", 1, true)
-    and text:find("function chooseMapping", 1, true)
+  if type(text) ~= "string" then return false end
+  if not text:find("MCCR mapped GitHub bootloader", 1, true) then return false end
+  if not text:find("local PROGRAM_URLS = {", 1, true) then return false end
+  if not text:find("function chooseMapping", 1, true) then return false end
+  local loader = loadstring or load
+  if type(loader) == "function" then
+    local fn = loader(text, "@startup.lua")
+    if not fn then return false end
+  end
+  return true
 end
 
 local function run(name, lib)
@@ -1864,6 +1886,9 @@ local function run(name, lib)
       s.updatePlan.phase = "summary"
       s.updatePlan.summaryUntil = now + 12
     elseif s.updatePlan.phase == "summary" and now >= (s.updatePlan.summaryUntil or now) then
+      if s.updatePlan.kind == "bootloader" and s.updatePlan.id then
+        s.payloadGrace = { id = s.updatePlan.id, untilTime = now + 30 }
+      end
       s.updatePlan = nil
       s.updateStatus = {}
       s.updateUntil = nil
@@ -1933,8 +1958,10 @@ local function run(name, lib)
   local function serveBootloaderPayload(request)
     request = request or {}
     if request.kind ~= "bootloader" then return end
-    if not (s.updatePlan and s.updatePlan.id) then return end
-    if request.updateId ~= s.updatePlan.id then return end
+    local activeId = s.updatePlan and s.updatePlan.id
+    local graceId = s.payloadGrace and s.payloadGrace.untilTime and os.clock() < s.payloadGrace.untilTime and s.payloadGrace.id or nil
+    if not activeId and not graceId then return end
+    if request.updateId ~= activeId and request.updateId ~= graceId then return end
     local text = bootloaderPayload()
     local chunkSize = 6000
     if not text or not text:find("MCCR mapped GitHub bootloader", 1, true) then
@@ -2056,7 +2083,7 @@ local function run(name, lib)
       send({
         command = command,
         target = target.device,
-        program = target.program ~= "unknown" and target.program or "all",
+        program = kind == "bootloader" and "all" or (target.program ~= "unknown" and target.program or "all"),
         confirm = true,
         updateId = updateId,
         updateKind = kind,
