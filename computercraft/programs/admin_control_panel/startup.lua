@@ -1889,7 +1889,8 @@ local function run(name, lib)
   local function serveBootloaderPayload(request)
     request = request or {}
     if request.kind ~= "bootloader" then return end
-    if s.updatePlan and s.updatePlan.id and request.updateId and request.updateId ~= s.updatePlan.id then return end
+    if not (s.updatePlan and s.updatePlan.id) then return end
+    if request.updateId ~= s.updatePlan.id then return end
     local text = bootloaderPayload()
     local chunkSize = 6000
     if not text or not text:find("MCCR mapped GitHub bootloader", 1, true) then
@@ -1951,8 +1952,8 @@ local function run(name, lib)
 
     local updateId = tostring(os.getComputerID()) .. "-" .. tostring(math.floor(os.clock() * 1000))
     local command = kind == "bootloader" and "update_bootloader" or "update_program"
-    local baseDelay = kind == "bootloader" and 0 or 1
-    local stepDelay = 0.5
+    local baseDelay = 1
+    local stepDelay = kind == "bootloader" and 2 or 0.5
     local bootText = kind == "bootloader" and bootloaderPayload() or nil
     if kind == "bootloader" and not mccrValidBootloaderText(bootText) then
       local now = os.clock()
@@ -2167,7 +2168,7 @@ local function run(name, lib)
     y = y + 2
     button("update_all", 1, y, 14, "UPDATE ALL", colors.white, colors.orange)
     button("update_self", 17, y, 14, "UPDATE SELF", colors.white, colors.blue)
-    button("boot_all", 33, y, 12, "BOOT ALL", colors.white, colors.purple)
+    button("boot_all", 33, y, 12, "BOOT FLEET", colors.white, colors.purple)
     button("boot_self", 47, y, 12, "BOOT SELF", colors.white, colors.purple)
     y = y + 1
     button("show_versions", 1, y, 16, "VERSIONS", colors.black, colors.yellow)
