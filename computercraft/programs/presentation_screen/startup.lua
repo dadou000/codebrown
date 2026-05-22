@@ -1056,23 +1056,31 @@ local function drawCoreInfoPanel(t, lib, x, y, w, h, title, color, rows, pct)
   drawFrameBox(t, lib, x, y, w, h, colors.gray)
   local innerX = x + 2
   local innerW = math.max(1, w - 4)
+  local innerH = math.max(1, h - 2)
+  local maxRows = math.max(0, innerH - 1 - (pct ~= nil and 1 or 0))
+  local rowCount = math.min(maxRows, #(rows or {}))
+  local contentH = 1 + (pct ~= nil and 1 or 0) + rowCount
+  local yy = y + 1 + math.max(0, math.floor((innerH - contentH) / 2))
   local function writeCentered(yy, text, fg)
     text = lib.ui.short(tostring(text or ""), innerW)
     local tx = innerX + math.max(0, math.floor((innerW - #text) / 2))
     writeClip(t, lib, tx, yy, text, fg)
   end
-  writeCentered(y + 1, string.upper(tostring(title or "")), color or colors.white)
-  local yy = y + 2
+  writeCentered(yy, string.upper(tostring(title or "")), color or colors.white)
+  yy = yy + 1
   if pct ~= nil and yy < y + h - 1 then
     drawMeter(t, lib, innerX, yy, innerW, pct, color or colors.green)
     yy = yy + 1
   end
+  local drawn = 0
   for _, row in ipairs(rows or {}) do
+    if drawn >= rowCount then break end
     if yy >= y + h - 1 then break end
     local text = row.text or row[1] or ""
     local rowColor = row.color or row[2] or colors.white
     writeCentered(yy, text, rowColor)
     yy = yy + 1
+    drawn = drawn + 1
   end
 end
 
@@ -1195,8 +1203,8 @@ local function drawDraconicPresentation(t, lib, snap)
   writeClip(t, lib, titleX, 2, titleA, colors.red)
   writeClip(t, lib, titleX + #titleA, 2, titleB, colors.lightBlue)
 
-  local bodyY = 4
-  local bodyBottom = h - 1
+  local bodyY = 5
+  local bodyBottom = h - 2
   local bodyH = math.max(10, bodyBottom - bodyY + 1)
   local sideW = math.max(22, math.min(40, math.floor(w * 0.25)))
   local gap = 2
