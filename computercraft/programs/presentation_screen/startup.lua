@@ -1014,12 +1014,14 @@ local function drawFrameBox(t, lib, x, y, w, h, color)
   w = math.min(w, sw - x + 1)
   h = math.min(h, sh - y + 1)
   color = color or colors.gray
-  writeClip(t, lib, x, y, "+" .. string.rep("-", math.max(1, w - 2)) .. "+", color)
+  local fill = colors.black
+  writeClip(t, lib, x, y, string.rep(" ", w), color, color)
   for yy = y + 1, y + h - 2 do
-    writeClip(t, lib, x, yy, "|", color)
-    writeClip(t, lib, x + w - 1, yy, "|", color)
+    writeClip(t, lib, x, yy, " ", color, color)
+    writeClip(t, lib, x + 1, yy, string.rep(" ", math.max(1, w - 2)), colors.white, fill)
+    writeClip(t, lib, x + w - 1, yy, " ", color, color)
   end
-  writeClip(t, lib, x, y + h - 1, "+" .. string.rep("-", math.max(1, w - 2)) .. "+", color)
+  writeClip(t, lib, x, y + h - 1, string.rep(" ", w), color, color)
 end
 
 local function drawMeter(t, lib, x, y, w, pct, color)
