@@ -1054,17 +1054,24 @@ end
 local function drawCoreInfoPanel(t, lib, x, y, w, h, title, color, rows, pct)
   if w < 12 or h < 4 then return end
   drawFrameBox(t, lib, x, y, w, h, colors.gray)
-  writeClip(t, lib, x + 2, y + 1, string.upper(tostring(title or "")), color or colors.white)
+  local innerX = x + 2
+  local innerW = math.max(1, w - 4)
+  local function writeCentered(yy, text, fg)
+    text = lib.ui.short(tostring(text or ""), innerW)
+    local tx = innerX + math.max(0, math.floor((innerW - #text) / 2))
+    writeClip(t, lib, tx, yy, text, fg)
+  end
+  writeCentered(y + 1, string.upper(tostring(title or "")), color or colors.white)
   local yy = y + 2
   if pct ~= nil and yy < y + h - 1 then
-    drawMeter(t, lib, x + 2, yy, math.max(1, w - 4), pct, color or colors.green)
+    drawMeter(t, lib, innerX, yy, innerW, pct, color or colors.green)
     yy = yy + 1
   end
   for _, row in ipairs(rows or {}) do
     if yy >= y + h - 1 then break end
     local text = row.text or row[1] or ""
     local rowColor = row.color or row[2] or colors.white
-    writeClip(t, lib, x + 2, yy, lib.ui.short(tostring(text), math.max(1, w - 4)), rowColor)
+    writeCentered(yy, text, rowColor)
     yy = yy + 1
   end
 end
