@@ -626,6 +626,31 @@ local function firstCallNumber(obj, attrs, names)
   return nil
 end
 
+local function callNumberWithDiagnostics(obj, attrs, names, diagnostics)
+  for _, method in ipairs(names or {}) do
+    local value = attrs and attrs[method] or nil
+    if type(value) == "number" then
+      if diagnostics then diagnostics[method] = "ok" end
+      return value
+    end
+    if type(value) == "string" and tonumber(value) then
+      if diagnostics then diagnostics[method] = "ok" end
+      return tonumber(value)
+    end
+    local called, err = tryCallStatus(obj, method)
+    if type(called) == "number" then
+      if diagnostics then diagnostics[method] = "ok" end
+      return called
+    end
+    if type(called) == "string" and tonumber(called) then
+      if diagnostics then diagnostics[method] = "ok" end
+      return tonumber(called)
+    end
+    if diagnostics and err ~= "missing" then diagnostics[method] = tostring(err or "nil") end
+  end
+  return nil
+end
+
 local function firstCallTable(obj, names, diagnostics)
   for _, method in ipairs(names or {}) do
     local value, err = tryCallStatus(obj, method)
@@ -715,7 +740,7 @@ local function tableAmount(t)
   if type(t) ~= "table" then return 0 end
   for _, item in pairs(t) do
     if type(item) == "table" then
-      total = total + (tonumber(item.amount) or tonumber(item.count) or tonumber(item.size) or 0)
+      total = total + (tonumber(item.amount) or tonumber(item.count) or tonumber(item.size) or tonumber(item.qty) or 0)
     end
   end
   return total
@@ -813,7 +838,12 @@ local function normalizeAe2(pname, ptype, attrs, previous, now, obj)
   local diagnostics = { methods = 0, ok = 0, errors = {} }
   if peripheral and peripheral.getMethods then
     local okMethods, methods = pcall(peripheral.getMethods, pname)
-    if okMethods and type(methods) == "table" then diagnostics.methods = #methods end
+    if okMethods and type(methods) == "table" then
+      diagnostics.methods = #methods
+      table.sort(methods)
+      diagnostics.methodNames = {}
+      for i = 1, math.min(#methods, 16) do diagnostics.methodNames[i] = tostring(methods[i]) end
+    end
   end
   local function diagTable(names)
     local before = tableCount(diagnostics.errors)
@@ -822,23 +852,25 @@ local function normalizeAe2(pname, ptype, attrs, previous, now, obj)
     if not result and tableCount(diagnostics.errors) == before then diagnostics.errors[names[1] or "list"] = "missing" end
     return result or {}
   end
-  local items = diagTable({ "listItems" })
-  local fluids = diagTable({ "listFluid", "listFluids" })
-  local gases = diagTable({ "listGas" })
+  local items = diagTable({ "listItems", "getAvailableItems", "listAvailableItems", "listAll", "getAvailableObjects", "list", "getItems" })
+  local fluids = diagTable({ "listFluid", "listFluids", "getAvailableFluids", "listAvailableFluids", "getFluids" })
+  local gases = diagTable({ "listGas", "listGases", "getAvailableGases" })
   local cells = summarizeCells(diagTable({ "listCells" }))
   local cpus = summarizeCraftingCpus(diagTable({ "getCraftingCPUs" }))
   local itemCount = tableAmount(items)
   local fluidAmount = tableAmount(fluids)
   local gasAmount = tableAmount(gases)
-  local itemStorageUsed = firstCallNumber(obj, attrs, { "getUsedItemStorage", "usedItemStorage", "usedItems" })
-  local itemStorageTotal = firstCallNumber(obj, attrs, { "getTotalItemStorage", "totalItemStorage", "totalItems" })
-  local itemStorageAvailable = firstCallNumber(obj, attrs, { "getAvailableItemStorage", "availableItemStorage" })
-  local fluidStorageUsed = firstCallNumber(obj, attrs, { "getUsedFluidStorage", "usedFluidStorage" })
-  local fluidStorageTotal = firstCallNumber(obj, attrs, { "getTotalFluidStorage", "totalFluidStorage" })
-  local fluidStorageAvailable = firstCallNumber(obj, attrs, { "getAvailableFluidStorage", "availableFluidStorage" })
-  local energyStored = firstCallNumber(obj, attrs, { "getEnergyStorage", "getEnergyStored", "getEnergy" })
-  local energyCapacity = firstCallNumber(obj, attrs, { "getMaxEnergyStorage", "getMaxEnergyStored", "getMaxEnergy" })
-  local energyUsage = firstCallNumber(obj, attrs, { "getEnergyUsage", "energyUsage" })
+  local itemStorageUsed = callNumberWithDiagnostics(obj, attrs, { "getUsedItemStorage", "usedItemStorage", "usedItems", "getUsedBytes", "usedBytes" }, diagnostics.errors)
+  local itemStorageTotal = callNumberWithDiagnostics(obj, attrs, { "getTotalItemStorage", "totalItemStorage", "totalItems", "getTotalBytes", "totalBytes" }, diagnostics.errors)
+  local itemStorageAvailable = callNumberWithDiagnostics(obj, attrs, { "getAvailableItemStorage", "availableItemStorage", "getAvailableBytes", "availableBytes" }, diagnostics.errors)
+  local fluidStorageUsed = callNumberWithDiagnostics(obj, attrs, { "getUsedFluidStorage", "usedFluidStorage" }, diagnostics.errors)
+  local fluidStorageTotal = callNumberWithDiagnostics(obj, attrs, { "getTotalFluidStorage", "totalFluidStorage" }, diagnostics.errors)
+  local fluidStorageAvailable = callNumberWithDiagnostics(obj, attrs, { "getAvailableFluidStorage", "availableFluidStorage" }, diagnostics.errors)
+  local energyStored = callNumberWithDiagnostics(obj, attrs, { "getEnergyStorage", "getEnergyStored", "getEnergy", "getStoredPower", "getStoredEnergy", "getAECurrentPower" }, diagnostics.errors)
+  local energyCapacity = callNumberWithDiagnostics(obj, attrs, { "getMaxEnergyStorage", "getMaxEnergyStored", "getMaxEnergy", "getMaxStoredPower", "getEnergyCapacity", "getAEMaxPower" }, diagnostics.errors)
+  local energyUsage = callNumberWithDiagnostics(obj, attrs, { "getEnergyUsage", "energyUsage", "getAvgPowerUsage", "getIdlePowerUsage", "getPowerUsage", "getAEPowerUsage" }, diagnostics.errors)
+  if not itemStorageUsed and itemCount > 0 then itemStorageUsed = itemCount end
+  if not itemStorageTotal and itemStorageAvailable and itemStorageUsed then itemStorageTotal = itemStorageUsed + itemStorageAvailable end
   local scalarOk = 0
   for _, value in ipairs({ itemStorageUsed, itemStorageTotal, itemStorageAvailable, fluidStorageUsed, fluidStorageTotal, fluidStorageAvailable, energyStored, energyCapacity, energyUsage }) do
     if value ~= nil then scalarOk = scalarOk + 1 end
@@ -890,8 +922,8 @@ local function normalizeAe2(pname, ptype, attrs, previous, now, obj)
     craftingCpuBusy = cpus.busy,
     craftingCoProcessors = cpus.coprocessors,
     craftingStorage = cpus.storage,
-    craftableItems = tableCount(firstCallTable(obj, { "listCraftableItems" }, diagnostics.errors)),
-    craftableFluids = tableCount(firstCallTable(obj, { "listCraftableFluid", "listCraftableFluids" }, diagnostics.errors)),
+    craftableItems = tableCount(firstCallTable(obj, { "listCraftableItems", "listCraft", "getCraftableItems", "getCraftableObjects" }, diagnostics.errors)),
+    craftableFluids = tableCount(firstCallTable(obj, { "listCraftableFluid", "listCraftableFluids", "getCraftableFluids" }, diagnostics.errors)),
     cellCount = cells.count,
     itemCellCount = cells.item,
     fluidCellCount = cells.fluid,
@@ -1060,6 +1092,15 @@ local function run(name, lib)
       for method, err in pairs(diag.errors or {}) do
         if y > select(2, lib.ui.size(screen)) then break end
         lib.ui.writeAt(screen, 1, y, lib.ui.short(tostring(method) .. ": " .. tostring(err), select(1, lib.ui.size(screen))), colors.gray)
+        y = y + 1
+      end
+      if y <= select(2, lib.ui.size(screen)) then
+        lib.ui.writeAt(screen, 1, y, "Methods:", colors.white)
+        y = y + 1
+      end
+      for _, method in ipairs(diag.methodNames or {}) do
+        if y > select(2, lib.ui.size(screen)) then break end
+        lib.ui.writeAt(screen, 1, y, lib.ui.short(" - " .. tostring(method), select(1, lib.ui.size(screen))), colors.lightGray)
         y = y + 1
       end
       return
