@@ -969,6 +969,45 @@ local function drawDraconicCard(t, lib, x, y, w, label, value, accent, note, pro
   end
 end
 
+local function drawDraconicBubble(t, lib, x, y, w, label, value, accent, note, progress)
+  local sw, sh = lib.ui.size(t)
+  if y > sh or x > sw then return end
+  w = math.max(8, math.min(w or 8, sw - x + 1))
+  accent = accent or colors.lightBlue
+  lib.ui.writeAt(t, x, y, string.rep(" ", w), colors.white, colors.gray)
+  lib.ui.writeAt(t, x, y, " " .. string.upper(tostring(label or "")), accent, colors.gray)
+  if y + 1 <= sh then
+    lib.ui.writeAt(t, x, y + 1, string.rep(" ", w), colors.white, colors.black)
+    lib.ui.writeAt(t, x + 1, y + 1, lib.ui.short(tostring(value or "--"), math.max(1, w - 2)), colors.white, colors.black)
+  end
+  if progress ~= nil and y + 2 <= sh then
+    lib.ui.writeAt(t, x, y + 2, string.rep(" ", w), colors.white, colors.black)
+    lib.ui.bar(t, x + 1, y + 2, math.max(1, w - 2), math.max(0, math.min(100, tonumber(progress) or 0)), 100, accent)
+  elseif note and y + 2 <= sh then
+    lib.ui.writeAt(t, x, y + 2, string.rep(" ", w), colors.white, colors.black)
+    lib.ui.writeAt(t, x + 1, y + 2, lib.ui.short(tostring(note), math.max(1, w - 2)), colors.gray, colors.black)
+  end
+  if progress ~= nil and note and y + 3 <= sh then
+    lib.ui.writeAt(t, x, y + 3, string.rep(" ", w), colors.white, colors.black)
+    lib.ui.writeAt(t, x + 1, y + 3, lib.ui.short(tostring(note), math.max(1, w - 2)), colors.gray, colors.black)
+  end
+end
+
+local function drawCoreLink(t, lib, x1, y, x2, color, phase)
+  local w, h = lib.ui.size(t)
+  if y < 1 or y > h then return end
+  x1 = math.max(1, math.min(w, x1))
+  x2 = math.max(1, math.min(w, x2))
+  if math.abs(x2 - x1) < 2 then return end
+  local chars = { "-", "=", "~", "=" }
+  local ch = chars[((tonumber(phase) or 0) % #chars) + 1]
+  if x1 < x2 then
+    writeClip(t, lib, x1, y, string.rep(ch, math.max(1, x2 - x1 - 1)) .. ">", color)
+  else
+    writeClip(t, lib, x2, y, "<" .. string.rep(ch, math.max(1, x1 - x2 - 1)), color)
+  end
+end
+
 local function drawDraconicPresentation(t, lib, snap)
   local w, h = lib.ui.size(t)
   local d = draconicSummary(snap or {})
@@ -989,42 +1028,39 @@ local function drawDraconicPresentation(t, lib, snap)
   local summary = string.format("%d core%s  %s  ETA %s", #cores, #cores == 1 and "" or "s", fmtFlow(d.netRfPerTick), tostring(d.eta or "--"))
   lib.ui.center(t, 2, lib.ui.short(summary, w), colors.gray)
 
-  local storedBarW = math.max(8, w - 4)
-  lib.ui.bar(t, 2, 4, storedBarW, pct, 100, pct > 85 and colors.red or colors.orange)
-  writeClip(t, lib, 3, 4, string.format("STORED %0.1f%%", pct), colors.white)
-  writeClip(t, lib, math.max(2, math.floor(w * 0.58)), 4, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), colors.gray)
-
-  local stripY = 6
-  writeClip(t, lib, 2, stripY, "FLOW " .. fmtFlow(d.netRfPerTick), (tonumber(d.netRfPerTick) or 0) >= 0 and colors.green or colors.orange)
-  writeClip(t, lib, math.max(2, math.floor(w * 0.36)), stripY, "ETA " .. tostring(d.etaMode or "stable") .. " " .. tostring(d.eta or "--"), colors.lightBlue)
-  writeClip(t, lib, math.max(2, math.floor(w * 0.67)), stripY, string.format("BUS %0.0fV  %0.3fA", tonumber(bus.voltage) or 1000000, tonumber(bus.current) or 0), colors.yellow)
-
-  local artTop = 8
-  local artBottom = h - 5
-  local artW = math.max(22, math.min(math.floor(w * 0.46), w - 34))
-  local artH = math.min(18, artBottom - artTop + 1)
-  local artX = 2
-  local artY = artTop
-  local rightX = artX + artW + 2
-  local rightW = math.max(14, w - rightX - 1)
+  local artTop = 7
+  local artBottom = h - 7
+  local artH = math.max(9, math.min(18, artBottom - artTop + 1))
+  local artW = math.max(28, math.min(math.floor(w * 0.34), artH * 3))
+  local artX = math.max(2, math.floor((w - artW) / 2) + 1)
+  local artY = math.max(4, math.floor((h - artH) / 2) + 1)
   drawCoreArt(t, lib, artX, artY, artW, artH, pct, phase)
 
-  local cardW = math.max(12, math.floor((rightW - 2) / 2))
-  local cardGap = math.max(1, rightW - (cardW * 2))
-  local cardX2 = rightX + cardW + cardGap
-  local cardY1 = artY
-  local cardY2 = artY + 5
+  local gap = 3
+  local bubbleW = math.max(18, math.min(34, math.floor((w - artW - (gap * 4)) / 2)))
+  local leftX = 2
+  local rightX = math.min(w - bubbleW + 1, artX + artW + gap)
+  local leftY1 = math.max(4, artY)
+  local leftY2 = math.min(h - 8, artY + math.max(5, math.floor(artH * 0.58)))
+  local rightY1 = leftY1
+  local rightY2 = leftY2
+  local linkIn = (tonumber(d.netRfPerTick) or 0) >= 0 and colors.green or colors.orange
 
-  drawDraconicCard(t, lib, rightX, cardY1, cardW, "stored", string.format("%0.1f%%", pct), colors.red, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), pct)
-  drawDraconicCard(t, lib, cardX2, cardY1, math.max(10, rightW - cardW - cardGap), "flow", fmtFlow(d.netRfPerTick), (tonumber(d.netRfPerTick) or 0) >= 0 and colors.green or colors.orange, "IN " .. fmtFlow(d.inputRfPerTick) .. "  OUT " .. fmtFlow(d.outputRfPerTick))
-  drawDraconicCard(t, lib, rightX, cardY2, cardW, "bus", string.format("%0.0fV", tonumber(bus.voltage) or 1000000), colors.yellow, string.format("%0.3fA  %0.3fMW", tonumber(bus.current) or 0, ((tonumber(bus.watts) or 0) / 1000000)))
-  drawDraconicCard(t, lib, cardX2, cardY2, math.max(10, rightW - cardW - cardGap), "status", string.upper(tostring(d.etaMode or "stable")), colors.lightBlue, "ETA " .. tostring(d.eta or "--"))
+  drawDraconicBubble(t, lib, leftX, leftY1, bubbleW, "stored", string.format("%0.1f%%", pct), colors.red, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), pct)
+  drawCoreLink(t, lib, leftX + bubbleW, leftY1 + 1, artX, colors.red, phase)
+  drawDraconicBubble(t, lib, leftX, leftY2, bubbleW, "bus", string.format("%0.0fV  %0.3fA", tonumber(bus.voltage) or 1000000, tonumber(bus.current) or 0), colors.yellow, string.format("%0.3fMW", ((tonumber(bus.watts) or 0) / 1000000)))
+  drawCoreLink(t, lib, leftX + bubbleW, leftY2 + 1, artX + 1, colors.yellow, phase + 1)
 
-  local listY = math.max(artY + artH + 1, cardY2 + 4)
+  drawDraconicBubble(t, lib, rightX, rightY1, bubbleW, "flow", fmtFlow(d.netRfPerTick), linkIn, "IN " .. fmtFlow(d.inputRfPerTick) .. "  OUT " .. fmtFlow(d.outputRfPerTick))
+  drawCoreLink(t, lib, artX + artW, rightY1 + 1, rightX - 1, linkIn, phase + 2)
+  drawDraconicBubble(t, lib, rightX, rightY2, bubbleW, "status", string.upper(tostring(d.etaMode or "stable")), colors.lightBlue, "ETA " .. tostring(d.eta or "--"))
+  drawCoreLink(t, lib, artX + artW - 1, rightY2 + 1, rightX - 1, colors.lightBlue, phase + 3)
+
+  local listY = math.max(artY + artH + 2, rightY2 + 4)
   if listY <= h then
     writeClip(t, lib, 2, listY, "CORE NODES", colors.red)
     listY = listY + 1
-    local cols = rightW >= 28 and 2 or 1
+    local cols = w >= 100 and 3 or 2
     local colW = math.max(18, math.floor((w - 2) / cols))
     for i, core in ipairs(cores) do
       local col = (i - 1) % cols

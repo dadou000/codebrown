@@ -2183,13 +2183,39 @@ local function run(name, lib)
     if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
     if h < 8 then return end
     local pct, done, failed, ack, total = updateProgress()
-    local kind = string.upper(tostring(s.updatePlan.kind or "update"))
-    local phase = s.updatePlan.phase == "summary" and "SUMMARY" or "ACTIVE"
-    local color = failed > 0 and colors.red or colors.yellow
-    local text = string.format(" %s %s %d%%  nodes %d  ack %d  ok %d  fail %d", kind, phase, pct, total, ack, done, failed)
-    lib.ui.writeAt(screen, 1, h, string.rep(" ", w), colors.white, colors.gray)
-    lib.ui.writeAt(screen, 1, h, text:sub(1, math.max(1, w - 12)), color, colors.gray)
-    lib.ui.bar(screen, math.max(1, w - 10), h, math.min(10, w), pct, 100, failed > 0 and colors.red or colors.green)
+    local rows = {}
+    for key, item in pairs(s.updatePlan.targets or {}) do
+      if type(item) == "table" then
+        item.key = key
+        rows[#rows + 1] = item
+      end
+    end
+    table.sort(rows, function(a, b)
+      local as, bs = tonumber(a.slot) or 999, tonumber(b.slot) or 999
+      if as == bs then return tostring(a.device or a.key) < tostring(b.device or b.key) end
+      return as < bs
+    end)
+    local current = nil
+    for _, item in ipairs(rows) do
+      local stage = tostring(item.stage or "queued")
+      if stage ~= "done" and stage ~= "rebooting" and stage ~= "failed" and stage ~= "timeout" then
+        current = item
+        if stage ~= "queued" and stage ~= "scheduled" and stage ~= "countdown" then break end
+      end
+    end
+    current = current or rows[#rows]
+    local kind = tostring(s.updatePlan.kind or "update")
+    local upperKind = string.upper(kind == "program" and "firmware" or kind)
+    local bg = kind == "bootloader" and colors.blue or colors.green
+    if failed > 0 then bg = colors.red end
+    local fg = bg == colors.green and colors.black or colors.white
+    local device = current and tostring(current.device or current.key or "waiting") or "waiting"
+    local stage = current and tostring(current.stage or "queued") or "queued"
+    local eta = current and tonumber(current.eta) or nil
+    local etaText = eta and eta > 0 and (" T-" .. tostring(math.ceil(eta)) .. "s") or ""
+    local text = string.format(" %s %d%%  %s %s%s  ack %d/%d  done %d  fail %d", upperKind, pct, device, stage, etaText, ack, total, done, failed)
+    lib.ui.writeAt(screen, 1, h, string.rep(" ", w), fg, bg)
+    lib.ui.writeAt(screen, 1, h, text:sub(1, w), fg, bg)
   end
 
   local function drawSettings(y, w)
