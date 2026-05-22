@@ -1235,7 +1235,8 @@ local function drawUpdateStatus(t, lib, s)
     local slot = item.slot and (tostring(item.slot) .. "/" .. tostring(item.total or "?") .. " ") or ""
     local text = slot .. tostring(item.device or item.key) .. " " .. tostring(item.stage or "queued")
     if item.version or item.currentVersion then text = text .. " v" .. tostring(item.version or item.currentVersion) end
-    if item.eta then text = text .. " T-" .. tostring(item.eta) .. "s" end
+    local eta = tonumber(item.eta)
+    if eta and eta > 0 then text = text .. " T-" .. tostring(math.ceil(eta)) .. "s" end
     if item.detail then text = text .. " " .. tostring(item.detail) end
     lib.ui.writeAt(t, 1, y, text, updateStageColor(item.stage))
     if item.progress then

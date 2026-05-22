@@ -931,6 +931,7 @@ local function run(name, lib)
         s.telemetry[p.name] = p
       end
     elseif pkt.kind == "update_status" then
+      if pkt.source == "admin_control_panel" then return end
       local p = pkt.payload or {}
       if p.updateId and s.activeUpdateId and p.updateId ~= s.activeUpdateId then
         s.updateStatus = {}

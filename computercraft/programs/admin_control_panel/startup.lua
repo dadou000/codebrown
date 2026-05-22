@@ -1684,7 +1684,11 @@ end
 local function run(name, lib)
   local statePath = "/mccr_state/" .. name .. ".dat"
   local updatePlanPath = "/mccr_state/update_plan.dat"
-  local s = lib.state.read(statePath, { tab = 1, snapshot = {}, eval = {}, powerGroup = "control", target = "main_presentation_screen", textColor = colors.white, bgColor = colors.black, theme = "default", updateStatus = {} })
+  local s = lib.state.read(statePath, { tab = 1, powerGroup = "control", target = "main_presentation_screen", displayMode = "overview", textColor = colors.white, bgColor = colors.black, theme = "default" })
+  s.snapshot = {}
+  s.eval = {}
+  s.updateStatus = {}
+  s.updateUntil = nil
   local persistedPlan = lib.state.read(updatePlanPath, nil)
   if type(persistedPlan) == "table" and persistedPlan.id and persistedPlan.targets then
     s.updatePlan = persistedPlan
@@ -1916,29 +1920,16 @@ local function run(name, lib)
     return any
   end
 
-  local function publishUpdateState()
-    if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
-    refreshUpdatePlan()
-    if not (s.updatePlan and s.updatePlan.id and s.updatePlan.targets) then return end
-    local rows = s.updatePlan.targets
-    for _, item in pairs(rows) do
-      if type(item) == "table" and item.device then
-        lib.net.broadcast(name, "update_status", {
-          device = item.device,
-          program = item.program,
-          stage = item.stage,
-          detail = item.detail,
-          progress = item.progress,
-          version = item.version or item.currentVersion,
-          currentVersion = item.currentVersion or item.version,
-          updateId = s.updatePlan.id,
-          updateKind = s.updatePlan.kind,
-          slot = item.slot,
-          total = item.total,
-          eta = item.eta,
-        })
-      end
-    end
+  local function savePanelState()
+    lib.state.write(statePath, {
+      tab = s.tab,
+      powerGroup = s.powerGroup,
+      target = s.target,
+      displayMode = s.displayMode,
+      textColor = s.textColor,
+      bgColor = s.bgColor,
+      theme = s.theme,
+    })
   end
 
   local function readWholeFile(path)
@@ -2360,9 +2351,8 @@ local function run(name, lib)
   while true do
     draw()
     resendPendingBreakers()
-    publishUpdateState()
     lib.net.broadcast(name, "telemetry", s.eval)
-    lib.state.write(statePath, s)
+    savePanelState()
     local timer = os.startTimer(1)
     while true do
       local ev = { os.pullEvent() }
