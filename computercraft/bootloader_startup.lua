@@ -1026,6 +1026,10 @@ while true do
       ensureProgram(cfg, program, instance)
       drawBootUpdate("FIRMWARE", "installed, starting", "program", program, instance, 100)
       drawConsoleStatus(program, instance, "rebooting", "program installed")
+      for _ = 1, 3 do
+        broadcastUpdateStatus(program, instance, "done", "program installed", 100)
+        sleep(0.2)
+      end
       sleep(0.5)
     end
   elseif ok then

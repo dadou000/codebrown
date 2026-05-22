@@ -1031,6 +1031,12 @@ while true do
       writeTable(BOOT_CONFIG, cfg)
       sleep(1)
       ensureProgram(cfg, program, instance)
+      drawBootUpdate("FIRMWARE", "installed, starting", program, instance)
+      drawConsoleStatus(program, instance, "rebooting", "program installed")
+      for _ = 1, 3 do
+        broadcastUpdateStatus(program, instance, "done", "program installed", 100)
+        sleep(0.2)
+      end
     end
   elseif ok then
     sleep(1)
@@ -1920,6 +1926,37 @@ local function run(name, lib)
     return any
   end
 
+  local function resolveUpdateTargetKey(payload, pkt)
+    if not (s.updatePlan and s.updatePlan.targets) then return nil end
+    payload = payload or {}
+    local candidates = {
+      payload.device,
+      pkt and pkt.source,
+      pkt and pkt.id,
+    }
+    for _, candidate in ipairs(candidates) do
+      local key = tostring(candidate or "")
+      if key ~= "" and s.updatePlan.targets[key] then return key end
+    end
+    for _, candidate in ipairs(candidates) do
+      local key = string.lower(tostring(candidate or ""))
+      if key ~= "" then
+        for targetKey, target in pairs(s.updatePlan.targets) do
+          if string.lower(tostring(targetKey)) == key or string.lower(tostring(target.device or "")) == key then
+            return targetKey
+          end
+        end
+      end
+    end
+    local slot = tonumber(payload.slot)
+    if slot then
+      for targetKey, target in pairs(s.updatePlan.targets) do
+        if tonumber(target.slot) == slot then return targetKey end
+      end
+    end
+    return nil
+  end
+
   local function savePanelState()
     lib.state.write(statePath, {
       tab = s.tab,
@@ -2392,12 +2429,13 @@ local function run(name, lib)
         elseif type(pkt) == "table" and pkt.system == "mccr" and pkt.kind == "update_status" and pkt.payload then
           local p = pkt.payload
           if s.updatePlan and s.updatePlan.id and p.updateId == s.updatePlan.id and p.slot and p.total then
-            local key = tostring(p.device or pkt.source or pkt.id or "unknown")
-            if s.updatePlan.targets and s.updatePlan.targets[key] then
+            local key = resolveUpdateTargetKey(p, pkt)
+            if key and s.updatePlan.targets and s.updatePlan.targets[key] then
+              local planned = s.updatePlan.targets[key]
               s.updateStatus = s.updateStatus or {}
               s.updateStatus[key] = {
-                device = p.device or key,
-                program = p.program,
+                device = planned.device or p.device or key,
+                program = p.program or planned.program,
                 stage = p.stage,
                 detail = p.detail,
                 progress = p.progress,
