@@ -1049,29 +1049,46 @@ local function drawRightPanel(t, lib, x, y, w, title, value, color, line1, line2
   if line2 and panelH >= 5 then writeClip(t, lib, x + 2, y + panelH - 1, lib.ui.short(tostring(line2), math.max(1, w - 4)), colors.gray) end
 end
 
+local function drawCoreInfoPanel(t, lib, x, y, w, h, title, color, rows, pct)
+  if w < 12 or h < 4 then return end
+  drawFrameBox(t, lib, x, y, w, h, colors.white)
+  writeClip(t, lib, x + 2, y + 1, string.upper(tostring(title or "")), color or colors.white)
+  local yy = y + 2
+  if pct ~= nil and yy < y + h - 1 then
+    drawMeter(t, lib, x + 2, yy, math.max(1, w - 4), pct, color or colors.green)
+    yy = yy + 1
+  end
+  for _, row in ipairs(rows or {}) do
+    if yy >= y + h - 1 then break end
+    local text = row.text or row[1] or ""
+    local rowColor = row.color or row[2] or colors.white
+    writeClip(t, lib, x + 2, yy, lib.ui.short(tostring(text), math.max(1, w - 4)), rowColor)
+    yy = yy + 1
+  end
+end
+
 local function drawDashboardCoreArt(t, lib, x, y, w, h, percent, phase)
   if w < 24 or h < 9 then return end
   local pct = math.max(0, math.min(100, tonumber(percent) or 0))
   phase = tonumber(phase) or 0
-  drawFrameBox(t, lib, x, y, w, h, colors.gray)
-  lib.ui.center(t, y + 1, "CORE VISUALIZATION", colors.lightBlue)
-
   local cx = x + math.floor(w / 2)
-  local cy = y + math.floor(h / 2) + 1
-  local radiusY = math.max(4, math.floor((h - 7) / 2))
-  local radiusX = math.max(10, math.min(math.floor((w - 12) / 2), radiusY * 2))
-  local pulse = phase % 4
+  local cy = y + math.floor(h / 2)
+  local maxY = math.max(4, math.floor((h - 7) / 2))
+  local radiusY = math.min(maxY, math.max(4, math.floor((w - 18) / 4)))
+  local radiusX = math.max(10, math.min(math.floor((w - 10) / 2), radiusY * 2))
+  local pulse = (phase or 0) % 4
 
   local function plot(px, py, ch, color)
-    if px > x + 1 and px < x + w - 1 and py > y + 2 and py < y + h - 1 then
+    if px >= x and px <= x + w - 1 and py >= y and py <= y + h - 1 then
       writeClip(t, lib, px, py, ch, color)
     end
   end
 
-  local function ring(rScale, color, chars, offset)
+  local function ring(rScale, color, chars, offset, step)
     local ry = math.max(2, math.floor(radiusY * rScale))
     local rx = math.max(4, math.floor(radiusX * rScale))
-    for row = -ry, ry do
+    step = step or 2
+    for row = -ry, ry, step do
       local yy = cy + row
       local norm = math.abs(row) / ry
       local span = math.floor(math.sqrt(math.max(0, 1 - norm * norm)) * rx)
@@ -1080,14 +1097,12 @@ local function drawDashboardCoreArt(t, lib, x, y, w, h, percent, phase)
         local ch = chars[idx]
         plot(cx - span, yy, ch, color)
         plot(cx + span, yy, ch, color)
-        if row % 2 == 0 then
-          local inner = math.max(1, span - math.floor(rx * 0.16))
-          plot(cx - inner, yy, ".", color)
-          plot(cx + inner, yy, ".", color)
-        end
+        local inner = math.max(1, span - math.floor(rx * 0.16))
+        plot(cx - inner, yy, ".", color)
+        plot(cx + inner, yy, ".", color)
       end
     end
-    for col = -rx, rx, 3 do
+    for col = -rx, rx, 4 do
       local norm = math.abs(col) / rx
       local span = math.floor(math.sqrt(math.max(0, 1 - norm * norm)) * ry)
       if span > 0 then
@@ -1099,16 +1114,40 @@ local function drawDashboardCoreArt(t, lib, x, y, w, h, percent, phase)
     end
   end
 
-  ring(1.00, colors.red, { ">", "^", "<", "v" }, 0)
-  ring(0.78, colors.orange, { ">", ">", "<", "<" }, 1)
-  ring(0.56, colors.yellow, { "^", ">", "v", "<" }, 2)
-  ring(0.34, colors.red, { ".", ".", "o", "." }, 3)
+  local bracketW = math.min(radiusX + 8, math.floor(w / 2) - 2)
+  local bracketH = math.min(radiusY + 4, math.floor(h / 2) - 1)
+  plot(cx - bracketW, cy - bracketH, "+", colors.red)
+  plot(cx - bracketW + 1, cy - bracketH, "-", colors.red)
+  plot(cx - bracketW, cy - bracketH + 1, "|", colors.red)
+  plot(cx + bracketW, cy - bracketH, "+", colors.red)
+  plot(cx + bracketW - 1, cy - bracketH, "-", colors.red)
+  plot(cx + bracketW, cy - bracketH + 1, "|", colors.red)
+  plot(cx - bracketW, cy + bracketH, "+", colors.red)
+  plot(cx - bracketW + 1, cy + bracketH, "-", colors.red)
+  plot(cx - bracketW, cy + bracketH - 1, "|", colors.red)
+  plot(cx + bracketW, cy + bracketH, "+", colors.red)
+  plot(cx + bracketW - 1, cy + bracketH, "-", colors.red)
+  plot(cx + bracketW, cy + bracketH - 1, "|", colors.red)
+
+  ring(1.00, colors.red, { ">", "^", "<", "v" }, 0, 1)
+  ring(0.82, colors.orange, { ">", ">", "<", "<" }, 1, 1)
+  ring(0.64, colors.yellow, { "^", ">", "v", "<" }, 2, 1)
+  ring(0.46, colors.orange, { ">", "^", "<", "v" }, 3, 1)
+  ring(0.30, colors.red, { ".", ".", "o", "." }, 0, 1)
+
+  for row = -radiusY + 1, radiusY - 1 do
+    local spread = math.floor((1 - math.abs(row) / radiusY) * radiusX * 0.72)
+    local color = math.abs(row) < radiusY * 0.25 and colors.yellow or colors.orange
+    if spread > 1 and row % 2 == (phase % 2) then
+      plot(cx - spread, cy + row, ">", color)
+      plot(cx + spread, cy + row, "<", color)
+    end
+  end
 
   local beamW = math.max(8, math.floor(radiusX * 1.25))
   writeClip(t, lib, cx - math.floor(beamW / 2), cy, string.rep("=", beamW), colors.orange)
   writeClip(t, lib, cx - 4, cy - 1, "CORE", colors.red)
   writeClip(t, lib, cx - 5, cy + 1, string.format("%0.1f%%", pct), colors.red)
-  writeClip(t, lib, math.max(x + 2, cx - 6), y + h - 2, "MAXIMUM LINK", colors.yellow)
 end
 
 local function drawDraconicPresentation(t, lib, snap)
@@ -1120,7 +1159,7 @@ local function drawDraconicPresentation(t, lib, snap)
     lib.ui.center(t, math.max(3, math.floor(h / 2)), "NO ENERGY CORE DETECTED", colors.yellow)
     return
   end
-  if w < 70 or h < 20 then
+  if w < 80 or h < 20 then
     drawDraconicStats(t, lib, snap)
     return
   end
@@ -1136,59 +1175,71 @@ local function drawDraconicPresentation(t, lib, snap)
   local statusText = pct >= 99.9 and "FULL" or (net >= 0 and "CHARGING" or "DISCHARGING")
   local coreStatus = cores[1] and tostring(cores[1].status or "online"):upper() or "ONLINE"
   local terminal = cores[1] and tostring(cores[1].terminal or cores[1].name or "T?") or "T?"
+  local maxFlow = math.max(math.abs(inFlow), math.abs(outFlow), math.abs(net))
+  local flowPct = math.min(100, math.abs(net) / math.max(1, math.abs(inFlow) + math.abs(outFlow)) * 100)
 
   drawFrameBox(t, lib, 1, 1, w, h, colors.white)
   drawFrameBox(t, lib, 2, 1, w - 2, 3, colors.white)
-  lib.ui.center(t, 2, "DRACONIC ENERGY CORE", colors.red)
+  local titleA = "DRACONIC ENERGY "
+  local titleB = "CORE"
+  local titleX = math.max(2, math.floor((w - (#titleA + #titleB)) / 2) + 1)
+  writeClip(t, lib, titleX, 2, titleA, colors.red)
+  writeClip(t, lib, titleX + #titleA, 2, titleB, colors.lightBlue)
 
   local bodyY = 4
-  local footerH = h >= 30 and 3 or 0
-  local bottomY = h - footerH
-  local bodyH = math.max(10, bottomY - bodyY + 1)
-  local rightW = math.max(28, math.floor(w * 0.42))
-  local leftW = math.max(32, w - rightW - 3)
-  local leftX = 1
-  local rightX = leftX + leftW + 1
-  local nodeH = 5
-  local coreH = math.max(9, bodyH - nodeH)
+  local bodyBottom = h - 1
+  local bodyH = math.max(10, bodyBottom - bodyY + 1)
+  local sideW = math.max(22, math.min(40, math.floor(w * 0.25)))
+  local gap = 2
+  local leftX = 3
+  local rightX = w - sideW - 2
+  local coreX = leftX + sideW + gap
+  local coreW = math.max(24, rightX - coreX - gap)
 
-  drawDashboardCoreArt(t, lib, leftX, bodyY, leftW, coreH, pct, phase)
-  local nodeY = bodyY + coreH
-  drawFrameBox(t, lib, leftX, nodeY, leftW, nodeH, colors.white)
-  writeClip(t, lib, leftX + 3, nodeY + 1, "CORE NODES", colors.white)
-  local nodeLine = string.format("left %s ONLINE %0.1f%%   %s", terminal, pct, fmtFlow(d.netRfPerTick))
-  writeClip(t, lib, leftX + 3, nodeY + 3, lib.ui.short(nodeLine, math.max(1, leftW - 6)), colors.red)
+  local pGap = 1
+  local pH = math.max(5, math.floor((bodyH - (2 * pGap)) / 3))
+  local p1 = bodyY
+  local p2 = p1 + pH + pGap
+  local p3 = p2 + pH + pGap
+  local p3H = math.max(5, bodyBottom - p3 + 1)
 
-  local panelCount = 5
-  local gap = 1
-  local panelH = math.max(3, math.floor((bodyH - ((panelCount - 1) * gap)) / panelCount))
-  local py = bodyY
-  if py + panelH - 1 <= bottomY then
-    drawRightPanel(t, lib, rightX, py, rightW, "stored", string.format("%0.1f%%", pct), colors.red, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), nil, pct, panelH)
-    py = py + panelH + gap
-  end
-  if py + panelH - 1 <= bottomY then
-    drawRightPanel(t, lib, rightX, py, rightW, "flow", fmtFlow(d.netRfPerTick), net >= 0 and colors.green or colors.orange, "IN " .. fmtEnergy(inFlow) .. "/t  OUT " .. fmtEnergy(outFlow) .. "/t", "MAX FLOW " .. fmtEnergy(math.max(math.abs(inFlow), math.abs(outFlow), math.abs(net))) .. "/t", math.min(100, math.abs(net) / math.max(1, math.abs(inFlow) + math.abs(outFlow)) * 100), panelH)
-    py = py + panelH + gap
-  end
-  if py + panelH - 1 <= bottomY then
-    drawRightPanel(t, lib, rightX, py, rightW, "bus", string.format("%0.3fM", busCurrent), colors.yellow, string.format("%0.0fV   %0.1fMW", busVolts, busMW), nil, 100, panelH)
-    py = py + panelH + gap
-  end
-  if py + panelH - 1 <= bottomY then
-    drawRightPanel(t, lib, rightX, py, rightW, "status", statusText, colors.lightBlue, tostring(#cores) .. " core " .. coreStatus, nil, nil, panelH)
-    py = py + panelH + gap
-  end
-  if py + panelH - 1 <= bottomY then
-    drawRightPanel(t, lib, rightX, py, rightW, "eta (" .. tostring(d.etaMode or "full") .. ")", tostring(d.eta or "--"), colors.lightBlue, "ESTIMATED TIME TO " .. string.upper(tostring(d.etaMode or "FULL")), nil, nil, panelH)
-  end
+  drawCoreInfoPanel(t, lib, leftX, p1, sideW, pH, "storage", colors.red, {
+    { text = string.format("%0.1f%%", pct), color = colors.white },
+    { text = fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), color = colors.gray },
+  }, pct)
+  drawCoreInfoPanel(t, lib, leftX, p2, sideW, pH, "flow", net >= 0 and colors.green or colors.orange, {
+    { text = fmtFlow(d.netRfPerTick), color = net >= 0 and colors.white or colors.orange },
+    { text = "IN  " .. fmtEnergy(inFlow) .. "/t", color = colors.green },
+    { text = "OUT " .. fmtEnergy(outFlow) .. "/t", color = colors.gray },
+  }, flowPct)
+  drawCoreInfoPanel(t, lib, leftX, p3, sideW, p3H, "bus", colors.yellow, {
+    { text = string.format("%0.0fV", busVolts), color = colors.white },
+    { text = string.format("%0.3fM / %0.3fM", busCurrent, busCurrent), color = colors.gray },
+    { text = string.format("%0.1fMW", busMW), color = colors.gray },
+  }, nil)
 
-  if footerH > 0 then
-    drawFrameBox(t, lib, 2, h - 2, w - 2, 3, colors.white)
-    local clockText = textutils and textutils.formatTime and textutils.formatTime(os.time and os.time() or 0, true) or tostring(os.time and os.time() or "--")
-    local footer = string.format(" %s  |  FIRMWARE %s  |  PERIPHERAL: DRACONIC CORE  |  STATUS: %s  |  TERMINAL: %s", clockText, tostring(MCCR_VERSION or "?"), coreStatus, terminal)
-    writeClip(t, lib, 4, h - 1, lib.ui.short(footer, w - 6), colors.lightBlue)
-  end
+  drawDashboardCoreArt(t, lib, coreX, bodyY, coreW, bodyH, pct, phase)
+
+  drawCoreInfoPanel(t, lib, rightX, p1, sideW, pH, "status", colors.lightBlue, {
+    { text = statusText, color = colors.white },
+    { text = "ETA " .. tostring(d.eta or "--"), color = colors.gray },
+    { text = tostring(#cores) .. " core " .. coreStatus, color = colors.gray },
+  }, nil)
+  drawCoreInfoPanel(t, lib, rightX, p2, sideW, pH, "flow limits", colors.green, {
+    { text = "-----------", color = colors.gray },
+    { text = "MAX FLOW", color = colors.yellow },
+    { text = fmtEnergy(maxFlow) .. "/t", color = colors.white },
+    { text = "MIN FLOW", color = colors.yellow },
+    { text = "0 RF/t", color = colors.white },
+  }, nil)
+  drawCoreInfoPanel(t, lib, rightX, p3, sideW, p3H, "flow stats", colors.lightBlue, {
+    { text = "MAX", color = colors.green },
+    { text = fmtEnergy(inFlow) .. "/t", color = colors.white },
+    { text = "MIN", color = colors.green },
+    { text = fmtEnergy(outFlow) .. "/t", color = colors.white },
+    { text = "AVERAGE", color = colors.green },
+    { text = fmtEnergy(net) .. "/t", color = colors.white },
+  }, nil)
 end
 
 local function drawStats(t, lib, snap, name)
