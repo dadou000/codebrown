@@ -1259,6 +1259,287 @@ local function drawDraconicPresentation(t, lib, snap)
   }, nil)
 end
 
+local function ae2Devices(snap)
+  local devices = {}
+  for source, bundle in pairs((snap or {}).peripherals or {}) do
+    for pname, item in pairs(bundle or {}) do
+      local label = tostring(pname or "")
+      local hay = string.lower(label .. " " .. tostring((item or {}).kind or "") .. " " .. tostring((item or {}).type or ""))
+      if type(item) == "table" and (item.kind == "ae2_network" or hay:find("ae2") or hay:find("applied") or hay:find("mebridge")) then
+        local copy = {}
+        for k, v in pairs(item) do copy[k] = v end
+        copy.source = source
+        copy.name = copy.name or pname
+        devices[#devices + 1] = copy
+      end
+    end
+  end
+  table.sort(devices, function(a, b) return tostring(a.name) < tostring(b.name) end)
+  return devices
+end
+
+local function nestedNumber(value, names)
+  if type(value) ~= "table" then return nil end
+  for _, key in ipairs(names or {}) do
+    local v = value[key]
+    if type(v) == "number" then return v end
+    if type(v) == "string" and tonumber(v) then return tonumber(v) end
+  end
+  for _, child in pairs(value) do
+    if type(child) == "table" then
+      local found = nestedNumber(child, names)
+      if found then return found end
+    end
+  end
+  return nil
+end
+
+local function fmtAeCount(value)
+  value = tonumber(value)
+  if not value then return "--" end
+  local units = { "", "k", "M", "G", "T" }
+  local n, unit = math.abs(value), 1
+  while n >= 1000 and unit < #units do n = n / 1000; unit = unit + 1 end
+  local scaled = value / (1000 ^ (unit - 1))
+  if unit == 1 then return string.format("%0.0f", scaled) end
+  return string.format("%0.1f%s", scaled, units[unit])
+end
+
+local function ae2Summary(snap)
+  local devices = ae2Devices(snap)
+  local used = 0
+  local capacity = 0
+  local inRate = nil
+  local outRate = nil
+  local powerUsage = nil
+  local powerCapacity = nil
+  local channels = nil
+  local p2p = nil
+  local jobs = nil
+  local cpus = nil
+  local fluids = nil
+  local tanks = nil
+  for _, item in ipairs(devices) do
+    local attrs = item.attrs or item
+    used = used + (nestedNumber(attrs, { "usedItemStorage", "itemCount", "items", "storedItems", "usedBytes", "energy" }) or 0)
+    capacity = capacity + (nestedNumber(attrs, { "totalItemStorage", "itemCapacity", "maxItems", "totalBytes", "capacity", "maxEnergy" }) or 0)
+    inRate = inRate or nestedNumber(attrs, { "itemsInPerTick", "inputRate", "inRate", "input" })
+    outRate = outRate or nestedNumber(attrs, { "itemsOutPerTick", "outputRate", "outRate", "output" })
+    powerUsage = powerUsage or nestedNumber(attrs, { "energyUsage", "powerUsage", "usage", "getEnergyUsage" })
+    powerCapacity = powerCapacity or nestedNumber(attrs, { "maxEnergyUsage", "powerCapacity", "capacity", "getMaxEnergy" })
+    channels = channels or nestedNumber(attrs, { "channels", "usedChannels", "channelCount" })
+    p2p = p2p or nestedNumber(attrs, { "p2p", "p2pTunnels", "tunnels" })
+    jobs = jobs or nestedNumber(attrs, { "craftingJobs", "jobs", "queuedJobs" })
+    cpus = cpus or nestedNumber(attrs, { "craftingCpus", "cpus", "busyCpus" })
+    fluids = fluids or nestedNumber(attrs, { "fluids", "fluidCount", "storedFluids" })
+    tanks = tanks or nestedNumber(attrs, { "tanks", "fluidTanks" })
+  end
+  local percent = capacity > 0 and math.max(0, math.min(100, used / capacity * 100)) or (#devices > 0 and 0 or nil)
+  local inValue = inRate or 0
+  local outValue = outRate or 0
+  return {
+    devices = devices,
+    online = #devices > 0,
+    used = used > 0 and used or nil,
+    capacity = capacity > 0 and capacity or nil,
+    percent = percent,
+    input = inValue,
+    output = outValue,
+    net = inValue - outValue,
+    powerUsage = powerUsage,
+    powerCapacity = powerCapacity,
+    channels = channels,
+    p2p = p2p,
+    jobs = jobs,
+    cpus = cpus,
+    fluids = fluids,
+    tanks = tanks,
+  }
+end
+
+local function drawAppliedPanel(t, lib, x, y, w, h, title, color, rows, pct)
+  if w < 14 or h < 4 then return end
+  drawFrameBox(t, lib, x, y, w, h, colors.gray)
+  writeClip(t, lib, x + 2, y + 1, string.upper(tostring(title or "")), color or colors.lightBlue)
+  local yy = y + 2
+  if pct ~= nil and yy < y + h - 1 then
+    lib.ui.bar(t, x + 2, yy, math.max(1, w - 4), pct, 100, color or colors.lightBlue)
+    yy = yy + 1
+  end
+  for _, row in ipairs(rows or {}) do
+    if yy >= y + h - 1 then break end
+    if row.sep then
+      writeClip(t, lib, x + 2, yy, string.rep("-", math.max(1, w - 4)), colors.gray)
+    else
+      local label = tostring(row.label or row[1] or "")
+      local value = tostring(row.value or row[2] or "")
+      local rowColor = row.color or row[3] or colors.white
+      local valueX = x + w - #value - 2
+      writeClip(t, lib, x + 2, yy, lib.ui.short(label, math.max(1, valueX - x - 3)), rowColor)
+      writeClip(t, lib, math.max(x + 2, valueX), yy, value, row.valueColor or rowColor)
+    end
+    yy = yy + 1
+  end
+end
+
+local function drawAppliedNode(t, lib, x, y, label, color)
+  writeClip(t, lib, x - 1, y - 1, "/\\", color)
+  writeClip(t, lib, x - 2, y, "<" .. lib.ui.short(label or "[]", 2) .. ">", color)
+  writeClip(t, lib, x - 1, y + 1, "\\/", color)
+end
+
+local function drawAppliedNetworkArt(t, lib, x, y, w, h, phase)
+  if w < 28 or h < 12 then return end
+  local cx = x + math.floor(w / 2)
+  local cy = y + math.floor(h / 2)
+  phase = tonumber(phase) or 0
+  local rx = math.max(10, math.floor(w * 0.34))
+  local ry = math.max(4, math.floor(h * 0.28))
+  local pulse = phase % 4
+  local function safe(px, py, text, color)
+    if px >= x and py >= y and px <= x + w - 1 and py <= y + h - 1 then writeClip(t, lib, px, py, text, color) end
+  end
+  for i = -rx, rx, 2 do
+    local top = cy - math.floor((1 - math.abs(i) / rx) * ry)
+    local bot = cy + math.floor((1 - math.abs(i) / rx) * ry)
+    local color = (i + pulse) % 4 == 0 and colors.purple or colors.lightBlue
+    safe(cx + i, top, ".", color)
+    safe(cx + i, bot, ".", color)
+  end
+  for i = -ry, ry do
+    local span = math.floor((1 - math.abs(i) / ry) * rx)
+    local color = (i + pulse) % 3 == 0 and colors.purple or colors.cyan
+    safe(cx - span, cy + i, ".", color)
+    safe(cx + span, cy + i, ".", color)
+  end
+  safe(cx - rx, cy, string.rep("-", math.max(1, rx * 2)), colors.lightBlue)
+  safe(cx, cy - ry, "|", colors.lightBlue)
+  safe(cx, cy + ry, "|", colors.lightBlue)
+  for i = 1, ry - 1 do
+    safe(cx - i * 2, cy - i, "/", colors.cyan)
+    safe(cx + i * 2, cy - i, "\\", colors.cyan)
+    safe(cx - i * 2, cy + i, "\\", colors.purple)
+    safe(cx + i * 2, cy + i, "/", colors.purple)
+  end
+  drawAppliedNode(t, lib, cx, cy - ry - 2, "[]", colors.lightBlue)
+  drawAppliedNode(t, lib, cx, cy + ry + 2, "[]", colors.lightBlue)
+  drawAppliedNode(t, lib, cx - rx, cy, "[]", colors.cyan)
+  drawAppliedNode(t, lib, cx + rx, cy, "[]", colors.cyan)
+  drawAppliedNode(t, lib, cx - math.floor(rx * 0.55), cy - math.floor(ry * 0.8), "[]", colors.purple)
+  drawAppliedNode(t, lib, cx + math.floor(rx * 0.55), cy - math.floor(ry * 0.8), "[]", colors.purple)
+  drawAppliedNode(t, lib, cx - math.floor(rx * 0.55), cy + math.floor(ry * 0.8), "[]", colors.lightBlue)
+  drawAppliedNode(t, lib, cx + math.floor(rx * 0.55), cy + math.floor(ry * 0.8), "[]", colors.lightBlue)
+  writeClip(t, lib, cx - 4, cy - 2, " /\\ ", colors.purple)
+  writeClip(t, lib, cx - 5, cy - 1, "/  \\", colors.purple)
+  writeClip(t, lib, cx - 5, cy, "\\  /", colors.purple)
+  writeClip(t, lib, cx - 4, cy + 1, " \\/ ", colors.purple)
+  writeClip(t, lib, cx - 3, cy, "CORE", colors.white)
+end
+
+local function drawAppliedTopology(t, lib, x, y, w, h, summary)
+  drawFrameBox(t, lib, x, y, w, h, colors.gray)
+  lib.ui.center(t, y + 1, "NETWORK TOPOLOGY", colors.cyan)
+  local labels = {
+    { "DRIVES", tostring(#(summary.devices or {})), colors.cyan },
+    { "INTERFACES", tostring(math.max(0, #(summary.devices or {}) - 1)), colors.lightBlue },
+    { "CHANNELS", tostring(summary.channels or "--"), colors.purple },
+    { "P2P LINKS", tostring(summary.p2p or "--"), colors.purple },
+  }
+  local cell = math.max(10, math.floor((w - 4) / #labels))
+  for i, item in ipairs(labels) do
+    local xx = x + 2 + (i - 1) * cell
+    writeClip(t, lib, xx, y + 3, "<>", item[3])
+    writeClip(t, lib, xx + 3, y + 3, item[1], item[3])
+    writeClip(t, lib, xx + 3, y + 4, item[2], colors.white)
+  end
+end
+
+local function drawAppliedPresentation(t, lib, snap)
+  local w, h = lib.ui.size(t)
+  if w < 80 or h < 20 then
+    drawDeviceList(t, lib, snap, "AE2", function(n, l) return n:find("ae2") or l:lower():find("ae2") end)
+    return
+  end
+  local sAe = ae2Summary(snap or {})
+  local pct = tonumber(sAe.percent) or 0
+  local phase = math.floor((os.clock() or 0) * 2) % 8
+  local sideW = math.max(24, math.min(34, math.floor(w * 0.25)))
+  local leftX = 3
+  local rightX = w - sideW - 2
+  local centerX = leftX + sideW + 3
+  local centerW = math.max(24, rightX - centerX - 3)
+  local titleY = 2
+  local bodyY = 4
+  local bottomY = h - 2
+  local topH = math.max(5, math.floor((bottomY - bodyY - 2) / 3))
+  local p1 = bodyY
+  local p2 = p1 + topH + 1
+  local p3 = p2 + topH + 1
+  local p3H = math.max(5, bottomY - p3 + 1)
+  local rightH = math.max(4, math.floor((bottomY - bodyY - 3) / 4))
+  local r1 = bodyY
+  local r2 = r1 + rightH + 1
+  local r3 = r2 + rightH + 1
+  local r4 = r3 + rightH + 1
+  local r4H = math.max(4, bottomY - r4 + 1)
+  local topoH = math.min(5, math.max(4, math.floor(h * 0.18)))
+  local topoY = bottomY - topoH + 1
+  local artH = math.max(10, topoY - bodyY - 1)
+
+  drawFrameBox(t, lib, 1, 1, w, h, colors.gray)
+  lib.ui.center(t, titleY, "APPLIED", colors.white)
+  drawAppliedPanel(t, lib, leftX, p1, sideW, topH, "storage", colors.cyan, {
+    { label = string.format("%0.1f%%", pct), value = "", color = colors.white },
+    { label = fmtAeCount(sAe.used), value = "/ " .. fmtAeCount(sAe.capacity) .. " ITEMS", color = colors.gray },
+    { sep = true },
+    { label = "IN", value = fmtAeCount(sAe.input) .. "/t", color = colors.green },
+    { label = "OUT", value = "-" .. fmtAeCount(sAe.output) .. "/t", color = colors.lightBlue },
+    { sep = true },
+    { label = "NET", value = fmtAeCount(sAe.net) .. "/t", color = colors.purple },
+  }, pct)
+  drawAppliedPanel(t, lib, leftX, p2, sideW, topH, "flow", colors.cyan, {
+    { label = "IN", value = fmtAeCount(sAe.input) .. "/t", color = colors.green },
+    { label = "OUT", value = fmtAeCount(sAe.output) .. "/t", color = colors.lightBlue },
+    { sep = true },
+    { label = "BALANCE", value = fmtAeCount(sAe.net) .. "/t", color = colors.purple },
+    { sep = true },
+    { label = "THROUGHPUT", value = pct > 0 and string.format("%0.0f%%", math.min(100, pct)) or "--", color = colors.gray },
+    { label = "CHANNELS", value = tostring(sAe.channels or "--"), color = colors.gray },
+  }, nil)
+  drawAppliedPanel(t, lib, leftX, p3, sideW, p3H, "power", colors.yellow, {
+    { label = "USAGE", value = sAe.powerUsage and (fmtAeCount(sAe.powerUsage) .. " AE/t") or "--", color = colors.gray },
+    { label = "CAPACITY", value = sAe.powerCapacity and (fmtAeCount(sAe.powerCapacity) .. " AE/t") or "--", color = colors.gray },
+    { sep = true },
+    { label = "BUFFER", value = string.format("%0.0f%%", pct), color = colors.yellow },
+  }, pct)
+
+  drawAppliedNetworkArt(t, lib, centerX, bodyY, centerW, artH, phase)
+  drawAppliedTopology(t, lib, centerX, topoY, centerW, topoH, sAe)
+
+  drawAppliedPanel(t, lib, rightX, r1, sideW, rightH, "status", colors.cyan, {
+    { label = sAe.online and "ONLINE" or "OFFLINE", value = "", color = sAe.online and colors.green or colors.red },
+    { sep = true },
+    { label = "UPTIME", value = tostring((snap or {}).cycle or 0) .. " cyc", color = colors.gray },
+    { label = "MEMORY", value = pct > 0 and string.format("%0.0f%%", pct) or "--", color = colors.gray },
+  }, nil)
+  drawAppliedPanel(t, lib, rightX, r2, sideW, rightH, "crafting", colors.purple, {
+    { label = "JOBS", value = tostring(sAe.jobs or "--"), color = colors.gray },
+    { label = "CPU BUSY", value = tostring(sAe.cpus or "--"), color = colors.gray },
+    { sep = true },
+    { label = "QUEUE", value = "--", color = colors.gray },
+    { label = "STORAGE", value = pct > 0 and string.format("%0.0f%%", pct) or "--", color = colors.gray },
+  }, nil)
+  drawAppliedPanel(t, lib, rightX, r3, sideW, rightH, "fluids", colors.cyan, {
+    { label = "TANKS", value = tostring(sAe.tanks or "--"), color = colors.gray },
+    { label = "FLUIDS", value = tostring(sAe.fluids or "--"), color = colors.gray },
+    { sep = true },
+    { label = "STORED", value = "-- mB", color = colors.gray },
+  }, nil)
+  drawAppliedPanel(t, lib, rightX, r4, sideW, r4H, "time to full", colors.yellow, {
+    { label = "ETA", value = sAe.net > 0 and "--" or "stable", color = colors.white },
+  }, nil)
+end
+
 local function drawStats(t, lib, snap, name)
   local mode = displayMode(snap, name, "all")
   if mode == "alarms" or mode == "warnings" then
@@ -1322,7 +1603,7 @@ local function drawPresentation(t, lib, snap, name)
   local load = ((buses.load or {}).watts or 0)
   local alert = snap.alert or {}
   if mode == "ae2" then
-    drawDeviceList(t, lib, snap, "AE2", function(n, l) return n:find("ae2") or l:lower():find("ae2") end)
+    drawAppliedPresentation(t, lib, snap)
   elseif mode == "draconic" then
     drawDraconicPresentation(t, lib, snap)
   elseif mode == "computers" then
