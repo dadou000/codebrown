@@ -1338,6 +1338,7 @@ local function ae2Summary(snap)
       craftableFluids = ae.craftableFluids,
       eta = ae.itemEta,
       etaMode = ae.itemEtaMode,
+      diagnostics = ae.diagnostics,
     }
   end
   local used = 0
@@ -1553,8 +1554,9 @@ local function drawAppliedPresentation(t, lib, snap)
   drawAppliedPanel(t, lib, rightX, r1, sideW, rightH, "status", colors.cyan, {
     { label = sAe.online and "ONLINE" or "OFFLINE", value = "", color = sAe.online and colors.green or colors.red },
     { sep = true },
+    { label = "POLL OK", value = tostring(((sAe.diagnostics or {}).ok) or 0), color = ((sAe.diagnostics or {}).ok or 0) > 0 and colors.green or colors.red },
     { label = "UPTIME", value = tostring((snap or {}).cycle or 0) .. " cyc", color = colors.gray },
-    { label = "MEMORY", value = pct > 0 and string.format("%0.0f%%", pct) or "--", color = colors.gray },
+    { label = "METHODS", value = tostring(((sAe.diagnostics or {}).methods) or "--"), color = colors.gray },
   }, nil)
   drawAppliedPanel(t, lib, rightX, r2, sideW, rightH, "crafting", colors.purple, {
     { label = "JOBS", value = tostring(sAe.jobs or "--"), color = colors.gray },

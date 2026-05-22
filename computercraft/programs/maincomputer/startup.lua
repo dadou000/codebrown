@@ -690,6 +690,7 @@ local function ae2Snapshot(peripherals)
     fluidCellCount = 0,
     cellBytes = 0,
     usedChannels = 0,
+    diagnostics = { ok = 0, methods = 0, errors = {} },
   }
   local itemEta, itemEtaMode = nil, "stable"
   for source, bundle in pairs(peripherals or {}) do
@@ -733,6 +734,10 @@ local function ae2Snapshot(peripherals)
         out.fluidCellCount = out.fluidCellCount + (asNumber(node.fluidCellCount) or 0)
         out.cellBytes = out.cellBytes + (asNumber(node.cellBytes) or 0)
         out.usedChannels = out.usedChannels + (asNumber(node.usedChannels) or 0)
+        local diag = node.diagnostics or {}
+        out.diagnostics.ok = out.diagnostics.ok + (asNumber(diag.ok) or 0)
+        out.diagnostics.methods = out.diagnostics.methods + (asNumber(diag.methods) or 0)
+        for method, err in pairs(diag.errors or {}) do out.diagnostics.errors[method] = err end
         itemEta = itemEta or node.itemEta
         itemEtaMode = itemEtaMode ~= "stable" and itemEtaMode or (node.itemEtaMode or itemEtaMode)
       end
