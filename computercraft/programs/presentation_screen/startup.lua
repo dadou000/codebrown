@@ -1008,12 +1008,95 @@ local function drawCoreLink(t, lib, x1, y, x2, color, phase)
   end
 end
 
+local function drawFrameBox(t, lib, x, y, w, h, color)
+  local sw, sh = lib.ui.size(t)
+  if w < 3 or h < 3 or x > sw or y > sh then return end
+  w = math.min(w, sw - x + 1)
+  h = math.min(h, sh - y + 1)
+  color = color or colors.gray
+  writeClip(t, lib, x, y, "+" .. string.rep("-", math.max(1, w - 2)) .. "+", color)
+  for yy = y + 1, y + h - 2 do
+    writeClip(t, lib, x, yy, "|", color)
+    writeClip(t, lib, x + w - 1, yy, "|", color)
+  end
+  writeClip(t, lib, x, y + h - 1, "+" .. string.rep("-", math.max(1, w - 2)) .. "+", color)
+end
+
+local function drawMeter(t, lib, x, y, w, pct, color)
+  pct = math.max(0, math.min(100, tonumber(pct) or 0))
+  w = math.max(1, w or 1)
+  local filled = math.floor((pct / 100) * w)
+  local text = string.rep("|", filled) .. string.rep(".", math.max(0, w - filled))
+  writeClip(t, lib, x, y, text, color or colors.green)
+end
+
+local function drawMetric(t, lib, x, y, label, value, color)
+  writeClip(t, lib, x, y, string.upper(tostring(label or "")), colors.gray)
+  writeClip(t, lib, x, y + 1, tostring(value or "--"), color or colors.white)
+end
+
+local function drawRightPanel(t, lib, x, y, w, title, value, color, line1, line2, pct, panelH)
+  panelH = math.max(3, tonumber(panelH) or 5)
+  drawFrameBox(t, lib, x, y, w, panelH, colors.gray)
+  writeClip(t, lib, x + 2, y + 1, string.upper(tostring(title or "")), color or colors.lightBlue)
+  writeClip(t, lib, math.max(x + 2, x + w - #tostring(value or "") - 1), y + 1, tostring(value or "--"), color or colors.white)
+  if pct ~= nil and panelH >= 4 then
+    drawMeter(t, lib, x + 2, y + 2, math.max(1, w - 4), pct, color or colors.green)
+  elseif line1 then
+    writeClip(t, lib, x + 2, y + 2, lib.ui.short(tostring(line1), math.max(1, w - 4)), colors.white)
+  end
+  if pct ~= nil and line1 and panelH >= 5 then writeClip(t, lib, x + 2, y + 3, lib.ui.short(tostring(line1), math.max(1, w - 4)), colors.gray) end
+  if line2 and panelH >= 5 then writeClip(t, lib, x + 2, y + panelH - 1, lib.ui.short(tostring(line2), math.max(1, w - 4)), colors.gray) end
+end
+
+local function drawDashboardCoreArt(t, lib, x, y, w, h, percent, phase)
+  if w < 24 or h < 9 then return end
+  local pct = math.max(0, math.min(100, tonumber(percent) or 0))
+  phase = tonumber(phase) or 0
+  drawFrameBox(t, lib, x, y, w, h, colors.gray)
+  lib.ui.center(t, y + 1, "CORE VISUALIZATION", colors.lightBlue)
+
+  local cx = x + math.floor(w / 2)
+  local cy = y + math.floor(h / 2)
+  local radiusY = math.max(3, math.floor((h - 6) / 2))
+  local radiusX = math.max(10, math.min(math.floor((w - 8) / 2), radiusY * 4))
+  local left = cx - radiusX
+  local right = cx + radiusX
+  local pulse = phase % 4
+
+  for row = -radiusY, radiusY do
+    local yy = cy + row
+    local norm = math.abs(row) / radiusY
+    local span = math.floor(math.sqrt(math.max(0, 1 - norm * norm)) * radiusX)
+    if span > 0 then
+      local xx = cx - span
+      local ww = span * 2
+      local ring = norm > 0.78
+      local fg = ring and colors.orange or ((row + pulse) % 3 == 0 and colors.yellow or colors.red)
+      local ch = ring and "." or (((row + pulse) % 2 == 0) and "=" or "-")
+      writeClip(t, lib, xx, yy, string.rep(ch, ww), fg)
+      if yy == cy then
+        writeClip(t, lib, xx, yy, string.rep("=", ww), colors.orange)
+      elseif math.abs(row) == math.floor(radiusY / 2) then
+        writeClip(t, lib, xx + math.floor(ww * 0.15), yy, string.rep("-", math.floor(ww * 0.70)), colors.red)
+      end
+    end
+  end
+
+  for yy = cy - radiusY, cy + radiusY do
+    if yy > y + 2 and yy < y + h - 2 then writeClip(t, lib, cx, yy, "|", colors.red) end
+  end
+  writeClip(t, lib, left, cy, string.rep("=", math.max(1, right - left)), colors.orange)
+  writeClip(t, lib, cx - 5, cy - 1, " CORE ", colors.white, colors.red)
+  writeClip(t, lib, cx - 5, cy, string.format(" %0.1f%% ", pct), colors.white, colors.red)
+  writeClip(t, lib, math.max(x + 2, cx - 6), y + h - 2, "MAXIMUM LINK", colors.yellow)
+end
+
 local function drawDraconicPresentation(t, lib, snap)
   local w, h = lib.ui.size(t)
   local d = draconicSummary(snap or {})
   local cores = d.cores or {}
   local phase = math.floor((os.clock() or 0) * 2) % 8
-  lib.ui.center(t, 1, "DRACONIC ENERGY CORE", colors.red)
   if #cores == 0 then
     lib.ui.center(t, math.max(3, math.floor(h / 2)), "NO ENERGY CORE DETECTED", colors.yellow)
     return
@@ -1025,56 +1108,70 @@ local function drawDraconicPresentation(t, lib, snap)
 
   local pct = tonumber(d.percent) or 0
   local bus = ((snap or {}).buses or {}).mv1 or {}
-  local summary = string.format("%d core%s  %s  ETA %s", #cores, #cores == 1 and "" or "s", fmtFlow(d.netRfPerTick), tostring(d.eta or "--"))
-  lib.ui.center(t, 2, lib.ui.short(summary, w), colors.gray)
+  local net = tonumber(d.netRfPerTick) or 0
+  local inFlow = tonumber(d.inputRfPerTick) or 0
+  local outFlow = tonumber(d.outputRfPerTick) or 0
+  local busVolts = tonumber(bus.voltage) or 1000000
+  local busCurrent = tonumber(bus.current) or 0
+  local busMW = (tonumber(bus.watts) or 0) / 1000000
+  local statusText = pct >= 99.9 and "FULL" or (net >= 0 and "CHARGING" or "DISCHARGING")
+  local coreStatus = cores[1] and tostring(cores[1].status or "online"):upper() or "ONLINE"
+  local terminal = cores[1] and tostring(cores[1].terminal or cores[1].name or "T?") or "T?"
 
-  local artTop = 7
-  local artBottom = h - 7
-  local artH = math.max(9, math.min(18, artBottom - artTop + 1))
-  local artW = math.max(28, math.min(math.floor(w * 0.34), artH * 3))
-  local artX = math.max(2, math.floor((w - artW) / 2) + 1)
-  local artY = math.max(4, math.floor((h - artH) / 2) + 1)
-  drawCoreArt(t, lib, artX, artY, artW, artH, pct, phase)
+  drawFrameBox(t, lib, 1, 1, w, h, colors.gray)
+  lib.ui.center(t, 2, "=-- DRACONIC ENERGY CORE --=", colors.red)
 
-  local gap = 3
-  local bubbleW = math.max(18, math.min(34, math.floor((w - artW - (gap * 4)) / 2)))
-  local leftX = 2
-  local rightX = math.min(w - bubbleW + 1, artX + artW + gap)
-  local leftY1 = math.max(4, artY)
-  local leftY2 = math.min(h - 8, artY + math.max(5, math.floor(artH * 0.58)))
-  local rightY1 = leftY1
-  local rightY2 = leftY2
-  local linkIn = (tonumber(d.netRfPerTick) or 0) >= 0 and colors.green or colors.orange
+  local topY = 4
+  drawFrameBox(t, lib, 3, topY, w - 4, 5, colors.gray)
+  writeClip(t, lib, 5, topY + 1, "[*]", colors.red)
+  drawMetric(t, lib, 14, topY + 1, "core count", tostring(#cores), colors.white)
+  drawMetric(t, lib, math.floor(w * 0.28), topY + 1, "transfer rate", fmtFlow(d.netRfPerTick), net >= 0 and colors.green or colors.orange)
+  drawMetric(t, lib, math.floor(w * 0.47), topY + 1, "eta (" .. tostring(d.etaMode or "full") .. ")", tostring(d.eta or "--"), colors.lightBlue)
+  drawMetric(t, lib, math.floor(w * 0.68), topY + 1, "bus capacity", string.format("%0.0fV", busVolts), colors.yellow)
+  drawMetric(t, lib, math.floor(w * 0.86), topY + 1, "core temp", "0.0%", colors.red)
 
-  drawDraconicBubble(t, lib, leftX, leftY1, bubbleW, "stored", string.format("%0.1f%%", pct), colors.red, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), pct)
-  drawCoreLink(t, lib, leftX + bubbleW, leftY1 + 1, artX, colors.red, phase)
-  drawDraconicBubble(t, lib, leftX, leftY2, bubbleW, "bus", string.format("%0.0fV  %0.3fA", tonumber(bus.voltage) or 1000000, tonumber(bus.current) or 0), colors.yellow, string.format("%0.3fMW", ((tonumber(bus.watts) or 0) / 1000000)))
-  drawCoreLink(t, lib, leftX + bubbleW, leftY2 + 1, artX + 1, colors.yellow, phase + 1)
+  local bodyY = topY + 6
+  local bottomY = h - 4
+  local bodyH = math.max(10, bottomY - bodyY + 1)
+  local rightW = math.max(30, math.floor(w * 0.39))
+  local leftW = math.max(32, w - rightW - 5)
+  local leftX = 3
+  local rightX = leftX + leftW + 2
 
-  drawDraconicBubble(t, lib, rightX, rightY1, bubbleW, "flow", fmtFlow(d.netRfPerTick), linkIn, "IN " .. fmtFlow(d.inputRfPerTick) .. "  OUT " .. fmtFlow(d.outputRfPerTick))
-  drawCoreLink(t, lib, artX + artW, rightY1 + 1, rightX - 1, linkIn, phase + 2)
-  drawDraconicBubble(t, lib, rightX, rightY2, bubbleW, "status", string.upper(tostring(d.etaMode or "stable")), colors.lightBlue, "ETA " .. tostring(d.eta or "--"))
-  drawCoreLink(t, lib, artX + artW - 1, rightY2 + 1, rightX - 1, colors.lightBlue, phase + 3)
+  drawDashboardCoreArt(t, lib, leftX, bodyY, leftW, bodyH, pct, phase)
+  local nodeY = bodyY + bodyH - 4
+  drawFrameBox(t, lib, leftX + 2, nodeY, math.max(20, leftW - 4), 3, colors.gray)
+  writeClip(t, lib, leftX + 4, nodeY + 1, "CORE NODES", colors.red)
+  local nodeLine = string.format("%s  %0.1f%%  |  %s  |  LEFT %s ONLINE  |  %d / %d", coreStatus, pct, fmtFlow(d.netRfPerTick), terminal, #cores, #cores)
+  writeClip(t, lib, leftX + 4, nodeY + 2, lib.ui.short(nodeLine, math.max(1, leftW - 8)), colors.white)
 
-  local listY = math.max(artY + artH + 2, rightY2 + 4)
-  if listY <= h then
-    writeClip(t, lib, 2, listY, "CORE NODES", colors.red)
-    listY = listY + 1
-    local cols = w >= 100 and 3 or 2
-    local colW = math.max(18, math.floor((w - 2) / cols))
-    for i, core in ipairs(cores) do
-      local col = (i - 1) % cols
-      local row = math.floor((i - 1) / cols)
-      local x = 2 + col * colW
-      local y = listY + row
-      if y <= h then
-        local status = tostring(core.status or "online"):upper()
-        local line = string.format("%s T%s %s %0.1f%% %s", tostring(core.label or core.name), tostring(core.tier or "?"), status, tonumber(core.percent) or 0, fmtFlow(core.netRfPerTick))
-        local c = (tonumber(core.percent) or 0) >= 75 and colors.green or ((tonumber(core.percent) or 0) >= 25 and colors.yellow or colors.red)
-        writeClip(t, lib, x, y, line, c)
-      end
-    end
+  local panelH = bodyH >= 22 and 5 or 4
+  local py = bodyY
+  if py + panelH - 1 <= bottomY then
+    drawRightPanel(t, lib, rightX, py, rightW, "stored", string.format("%0.1f%%", pct), colors.red, fmtEnergy(d.totalEnergy) .. " / " .. fmtEnergy(d.totalCapacity), nil, pct, panelH)
+    py = py + panelH + 1
   end
+  if py + panelH - 1 <= bottomY then
+    drawRightPanel(t, lib, rightX, py, rightW, "flow", fmtFlow(d.netRfPerTick), net >= 0 and colors.green or colors.orange, "IN " .. fmtEnergy(inFlow) .. "/t  |  OUT " .. fmtEnergy(outFlow) .. "/t", nil, math.min(100, math.abs(net) / math.max(1, math.abs(inFlow) + math.abs(outFlow)) * 100), panelH)
+    py = py + panelH + 1
+  end
+  if py + panelH - 1 <= bottomY then
+    drawRightPanel(t, lib, rightX, py, rightW, "bus", string.format("%0.3fM / %0.3fM", busCurrent, busCurrent), colors.yellow, string.format("%0.0fV  |  %0.1fMW", busVolts, busMW), nil, 100, panelH)
+    py = py + panelH + 1
+  end
+  if py + panelH - 1 <= bottomY then
+    local statusLine = "CORE IS " .. tostring(statusText) .. "  ETA " .. tostring(d.eta or "--")
+    drawRightPanel(t, lib, rightX, py, rightW, "status", statusText, colors.lightBlue, statusLine, nil, nil, panelH)
+    py = py + panelH + 1
+  end
+  if py + panelH - 1 <= bottomY then
+    drawRightPanel(t, lib, rightX, py, rightW, "eta (" .. tostring(d.etaMode or "full") .. ")", tostring(d.eta or "--"), colors.lightBlue, "ESTIMATED TIME TO " .. string.upper(tostring(d.etaMode or "FULL")), nil, nil, panelH)
+  end
+
+  drawFrameBox(t, lib, 3, h - 3, w - 4, 3, colors.gray)
+  local clockText = textutils and textutils.formatTime and textutils.formatTime(os.time and os.time() or 0, true) or tostring(os.time and os.time() or "--")
+  local footer = string.format(" %s  |  FIRMWARE %s  |  PERIPHERAL: DRACONIC CORE  |  STATUS: %s  |  TERMINAL: %s", clockText, tostring(MCCR_VERSION or "?"), coreStatus, terminal)
+  writeClip(t, lib, 5, h - 2, lib.ui.short(footer, w - 8), colors.lightBlue)
 end
 
 local function drawStats(t, lib, snap, name)
