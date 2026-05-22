@@ -654,6 +654,99 @@ local function draconicSnapshot(peripherals)
   }
 end
 
+local function ae2Snapshot(peripherals)
+  local devices = {}
+  local out = {
+    devices = devices,
+    online = false,
+    itemCount = 0,
+    itemTypes = 0,
+    itemStorageUsed = 0,
+    itemStorageTotal = 0,
+    itemStorageAvailable = 0,
+    itemInputPerTick = 0,
+    itemOutputPerTick = 0,
+    itemNetPerTick = 0,
+    fluidAmount = 0,
+    fluidTypes = 0,
+    fluidStorageUsed = 0,
+    fluidStorageTotal = 0,
+    fluidInputPerTick = 0,
+    fluidOutputPerTick = 0,
+    fluidNetPerTick = 0,
+    gasAmount = 0,
+    gasTypes = 0,
+    energyStored = 0,
+    energyCapacity = 0,
+    energyUsage = 0,
+    craftingCpuCount = 0,
+    craftingCpuBusy = 0,
+    craftingCoProcessors = 0,
+    craftingStorage = 0,
+    craftableItems = 0,
+    craftableFluids = 0,
+    cellCount = 0,
+    itemCellCount = 0,
+    fluidCellCount = 0,
+    cellBytes = 0,
+    usedChannels = 0,
+  }
+  local itemEta, itemEtaMode = nil, "stable"
+  for source, bundle in pairs(peripherals or {}) do
+    for pname, item in pairs(bundle or {}) do
+      if type(item) == "table" and item.kind == "ae2_network" then
+        local node = {}
+        for k, v in pairs(item) do node[k] = v end
+        node.source = source
+        node.name = node.name or pname
+        devices[#devices + 1] = node
+        out.online = true
+        out.itemCount = out.itemCount + (asNumber(node.itemCount) or 0)
+        out.itemTypes = out.itemTypes + (asNumber(node.itemTypes) or 0)
+        out.itemStorageUsed = out.itemStorageUsed + (asNumber(node.itemStorageUsed) or 0)
+        out.itemStorageTotal = out.itemStorageTotal + (asNumber(node.itemStorageTotal) or 0)
+        out.itemStorageAvailable = out.itemStorageAvailable + (asNumber(node.itemStorageAvailable) or 0)
+        out.itemInputPerTick = out.itemInputPerTick + (asNumber(node.itemInputPerTick) or 0)
+        out.itemOutputPerTick = out.itemOutputPerTick + (asNumber(node.itemOutputPerTick) or 0)
+        out.itemNetPerTick = out.itemNetPerTick + (asNumber(node.itemNetPerTick) or 0)
+        out.fluidAmount = out.fluidAmount + (asNumber(node.fluidAmount) or 0)
+        out.fluidTypes = out.fluidTypes + (asNumber(node.fluidTypes) or 0)
+        out.fluidStorageUsed = out.fluidStorageUsed + (asNumber(node.fluidStorageUsed) or 0)
+        out.fluidStorageTotal = out.fluidStorageTotal + (asNumber(node.fluidStorageTotal) or 0)
+        local fluidNet = asNumber(node.fluidNetPerTick) or 0
+        out.fluidNetPerTick = out.fluidNetPerTick + fluidNet
+        out.fluidInputPerTick = out.fluidInputPerTick + math.max(0, fluidNet)
+        out.fluidOutputPerTick = out.fluidOutputPerTick + math.max(0, -fluidNet)
+        out.gasAmount = out.gasAmount + (asNumber(node.gasAmount) or 0)
+        out.gasTypes = out.gasTypes + (asNumber(node.gasTypes) or 0)
+        out.energyStored = out.energyStored + (asNumber(node.energyStored) or 0)
+        out.energyCapacity = out.energyCapacity + (asNumber(node.energyCapacity) or 0)
+        out.energyUsage = out.energyUsage + (asNumber(node.energyUsage) or 0)
+        out.craftingCpuCount = out.craftingCpuCount + (asNumber(node.craftingCpuCount) or 0)
+        out.craftingCpuBusy = out.craftingCpuBusy + (asNumber(node.craftingCpuBusy) or 0)
+        out.craftingCoProcessors = out.craftingCoProcessors + (asNumber(node.craftingCoProcessors) or 0)
+        out.craftingStorage = out.craftingStorage + (asNumber(node.craftingStorage) or 0)
+        out.craftableItems = out.craftableItems + (asNumber(node.craftableItems) or 0)
+        out.craftableFluids = out.craftableFluids + (asNumber(node.craftableFluids) or 0)
+        out.cellCount = out.cellCount + (asNumber(node.cellCount) or 0)
+        out.itemCellCount = out.itemCellCount + (asNumber(node.itemCellCount) or 0)
+        out.fluidCellCount = out.fluidCellCount + (asNumber(node.fluidCellCount) or 0)
+        out.cellBytes = out.cellBytes + (asNumber(node.cellBytes) or 0)
+        out.usedChannels = out.usedChannels + (asNumber(node.usedChannels) or 0)
+        itemEta = itemEta or node.itemEta
+        itemEtaMode = itemEtaMode ~= "stable" and itemEtaMode or (node.itemEtaMode or itemEtaMode)
+      end
+    end
+  end
+  table.sort(devices, function(a, b) return tostring(a.name) < tostring(b.name) end)
+  out.itemStoragePercent = out.itemStorageTotal > 0 and math.max(0, math.min(100, out.itemStorageUsed / out.itemStorageTotal * 100)) or nil
+  out.fluidStoragePercent = out.fluidStorageTotal > 0 and math.max(0, math.min(100, out.fluidStorageUsed / out.fluidStorageTotal * 100)) or nil
+  out.energyPercent = out.energyCapacity > 0 and math.max(0, math.min(100, out.energyStored / out.energyCapacity * 100)) or nil
+  out.itemEta = itemEta
+  out.itemEtaMode = itemEtaMode
+  return out
+end
+
 local function run(name, lib)
   local statePath = "/mccr_state/" .. name .. ".dat"
   local actionPath = "/mccr_state/actions.log"
@@ -700,6 +793,7 @@ local function run(name, lib)
   end
   s.screenStyle = s.screenStyle or { textColor = colors.white, bgColor = colors.black, theme = "default" }
   s.draconic = s.draconic or draconicSnapshot(s.peripherals)
+  s.ae2 = s.ae2 or ae2Snapshot(s.peripherals)
 
   local screen = lib.ui.target(lib.devices.spec(name))
   lib.ui.boot(screen, lib.devices.spec(name).label or name)
@@ -719,6 +813,7 @@ local function run(name, lib)
 
   local function computeBuses(dt)
     s.draconic = draconicSnapshot(s.peripherals)
+    s.ae2 = ae2Snapshot(s.peripherals)
     local nuclear = s.breakers.plant_nuclear and 2500000 or 0
     local fusion = s.breakers.plant_fusion and 4000000 or 0
     local reserved = 0
@@ -843,6 +938,7 @@ local function run(name, lib)
       telemetry = telemetrySnapshot(),
       peripherals = s.peripherals,
       draconic = s.draconic,
+      ae2 = s.ae2,
       alert = s.alert,
       mode = s.mode,
       displayContexts = s.displayContexts,
@@ -892,6 +988,8 @@ local function run(name, lib)
       s.batteries = { battery400 = 100, pmc1 = 100, pmc2 = 100, pmc3 = 100 }
       s.telemetry = {}
       s.peripherals = {}
+      s.draconic = draconicSnapshot(s.peripherals)
+      s.ae2 = ae2Snapshot(s.peripherals)
       s.tempOffset = 0
       s.mode = "normal"
       lib.state.write(actionPath, {})
@@ -1059,6 +1157,7 @@ local function run(name, lib)
       tempOffset = s.tempOffset,
       cycle = s.cycle,
       draconic = s.draconic,
+      ae2 = s.ae2,
     })
     lib.net.broadcast(name, "snapshot", snapshot())
     sleep(1)

@@ -607,6 +607,12 @@ local function tryCall(obj, method)
   return nil
 end
 
+local function tryTableCall(obj, method)
+  local value = tryCall(obj, method)
+  if type(value) == "table" then return value end
+  return nil
+end
+
 local function compactValue(value, depth)
   local tv = type(value)
   if tv == "nil" or tv == "boolean" or tv == "number" or tv == "string" then return value end
@@ -626,11 +632,14 @@ end
 
 local function isSafeAttributeMethod(method)
   local m = string.lower(tostring(method or ""))
+  if m == "listitems" or m == "listfluid" or m == "listfluids" or m == "listgas" or m == "listcells"
+    or m == "listcraftableitems" or m == "listcraftablefluid" or m == "listcraftablefluids" then
+    return false
+  end
   return m:find("^get")
     or m:find("^is")
     or m:find("^has")
     or m:find("^can")
-    or m:find("^list")
 end
 
 local function callAllAttributes(obj, methods)
@@ -661,6 +670,53 @@ local function firstValue(attrs, names)
     if attrs[key] ~= nil then return attrs[key] end
   end
   return nil
+end
+
+local function tableCount(t)
+  local n = 0
+  if type(t) ~= "table" then return 0 end
+  for _ in pairs(t) do n = n + 1 end
+  return n
+end
+
+local function tableAmount(t)
+  local total = 0
+  if type(t) ~= "table" then return 0 end
+  for _, item in pairs(t) do
+    if type(item) == "table" then
+      total = total + (tonumber(item.amount) or tonumber(item.count) or tonumber(item.size) or 0)
+    end
+  end
+  return total
+end
+
+local function summarizeCraftingCpus(cpus)
+  local out = { count = 0, busy = 0, coprocessors = 0, storage = 0 }
+  if type(cpus) ~= "table" then return out end
+  for _, cpu in pairs(cpus) do
+    if type(cpu) == "table" then
+      out.count = out.count + 1
+      if cpu.isBusy or cpu.busy then out.busy = out.busy + 1 end
+      out.coprocessors = out.coprocessors + (tonumber(cpu.coProcessors) or tonumber(cpu.coprocessors) or 0)
+      out.storage = out.storage + (tonumber(cpu.storage) or 0)
+    end
+  end
+  return out
+end
+
+local function summarizeCells(cells)
+  local out = { count = 0, item = 0, fluid = 0, bytes = 0, bytesPerType = 0 }
+  if type(cells) ~= "table" then return out end
+  for _, cell in pairs(cells) do
+    if type(cell) == "table" then
+      local cellType = string.lower(tostring(cell.cellType or cell.type or "item"))
+      out.count = out.count + 1
+      if cellType:find("fluid") then out.fluid = out.fluid + 1 else out.item = out.item + 1 end
+      out.bytes = out.bytes + (tonumber(cell.totalBytes) or tonumber(cell.bytes) or 0)
+      out.bytesPerType = out.bytesPerType + (tonumber(cell.bytesPerType) or 0)
+    end
+  end
+  return out
 end
 
 local function formatEtaTicks(energy, capacity, netRfPerTick)
@@ -722,6 +778,82 @@ local function normalizeDraconic(pname, ptype, attrs, previous, now)
   }
 end
 
+local function normalizeAe2(pname, ptype, attrs, previous, now, obj)
+  local items = tryTableCall(obj, "listItems") or {}
+  local fluids = tryTableCall(obj, "listFluid") or tryTableCall(obj, "listFluids") or {}
+  local gases = tryTableCall(obj, "listGas") or {}
+  local cells = summarizeCells(tryTableCall(obj, "listCells"))
+  local cpus = summarizeCraftingCpus(tryTableCall(obj, "getCraftingCPUs"))
+  local itemCount = tableAmount(items)
+  local fluidAmount = tableAmount(fluids)
+  local gasAmount = tableAmount(gases)
+  local itemStorageUsed = firstNumber(attrs, { "getUsedItemStorage", "usedItemStorage", "usedItems" })
+  local itemStorageTotal = firstNumber(attrs, { "getTotalItemStorage", "totalItemStorage", "totalItems" })
+  local itemStorageAvailable = firstNumber(attrs, { "getAvailableItemStorage", "availableItemStorage" })
+  local fluidStorageUsed = firstNumber(attrs, { "getUsedFluidStorage", "usedFluidStorage" })
+  local fluidStorageTotal = firstNumber(attrs, { "getTotalFluidStorage", "totalFluidStorage" })
+  local fluidStorageAvailable = firstNumber(attrs, { "getAvailableFluidStorage", "availableFluidStorage" })
+  local energyStored = firstNumber(attrs, { "getEnergyStorage", "getEnergyStored", "getEnergy" })
+  local energyCapacity = firstNumber(attrs, { "getMaxEnergyStorage", "getMaxEnergyStored", "getMaxEnergy" })
+  local energyUsage = firstNumber(attrs, { "getEnergyUsage", "energyUsage" })
+  local itemNet, itemStorageNet, fluidNet = nil, nil, nil
+  if previous and previous.time and now > previous.time then
+    local ticks = math.max(0.05, (now - previous.time) * 20)
+    if previous.itemCount and itemCount then itemNet = (itemCount - previous.itemCount) / ticks end
+    if previous.itemStorageUsed and itemStorageUsed then itemStorageNet = (itemStorageUsed - previous.itemStorageUsed) / ticks end
+    if previous.fluidAmount and fluidAmount then fluidNet = (fluidAmount - previous.fluidAmount) / ticks end
+  end
+  local eta, etaMode = nil, "stable"
+  if itemStorageUsed and itemStorageTotal and itemStorageNet and math.abs(itemStorageNet) > 0.0001 then
+    eta, etaMode = formatEtaTicks(itemStorageUsed, itemStorageTotal, itemStorageNet)
+  end
+  return {
+    name = pname,
+    type = ptype,
+    kind = "ae2_network",
+    label = tostring(firstValue(attrs, { "getName", "getSystemName" }) or pname),
+    status = "online",
+    itemTypes = tableCount(items),
+    itemCount = itemCount,
+    itemStorageUsed = itemStorageUsed,
+    itemStorageTotal = itemStorageTotal,
+    itemStorageAvailable = itemStorageAvailable,
+    itemStoragePercent = (itemStorageUsed and itemStorageTotal and itemStorageTotal > 0) and math.max(0, math.min(100, itemStorageUsed / itemStorageTotal * 100)) or nil,
+    itemInputPerTick = itemNet and math.max(0, itemNet) or 0,
+    itemOutputPerTick = itemNet and math.max(0, -itemNet) or 0,
+    itemNetPerTick = itemNet or 0,
+    itemStorageNetPerTick = itemStorageNet or 0,
+    itemEta = eta,
+    itemEtaMode = etaMode,
+    fluidTypes = tableCount(fluids),
+    fluidAmount = fluidAmount,
+    fluidStorageUsed = fluidStorageUsed,
+    fluidStorageTotal = fluidStorageTotal,
+    fluidStorageAvailable = fluidStorageAvailable,
+    fluidStoragePercent = (fluidStorageUsed and fluidStorageTotal and fluidStorageTotal > 0) and math.max(0, math.min(100, fluidStorageUsed / fluidStorageTotal * 100)) or nil,
+    fluidNetPerTick = fluidNet or 0,
+    gasTypes = tableCount(gases),
+    gasAmount = gasAmount,
+    energyStored = energyStored,
+    energyCapacity = energyCapacity,
+    energyUsage = energyUsage,
+    energyPercent = (energyStored and energyCapacity and energyCapacity > 0) and math.max(0, math.min(100, energyStored / energyCapacity * 100)) or nil,
+    craftingCpuCount = cpus.count,
+    craftingCpuBusy = cpus.busy,
+    craftingCoProcessors = cpus.coprocessors,
+    craftingStorage = cpus.storage,
+    craftableItems = tableCount(tryTableCall(obj, "listCraftableItems")),
+    craftableFluids = tableCount(tryTableCall(obj, "listCraftableFluid") or tryTableCall(obj, "listCraftableFluids")),
+    cellCount = cells.count,
+    itemCellCount = cells.item,
+    fluidCellCount = cells.fluid,
+    cellBytes = cells.bytes,
+    cellBytesPerType = cells.bytesPerType,
+    usedChannels = 1,
+    attrs = attrs,
+  }
+end
+
 local function callMethod(obj, method, ...)
   if not obj or type(obj[method]) ~= "function" then return false end
   local ok = pcall(obj[method], ...)
@@ -733,6 +865,7 @@ local function run(name, lib)
   local s = lib.state.read(statePath, { discovered = {}, snapshot = {}, cycle = 0, channel = "fans" })
   s.draconicPrev = s.draconicPrev or {}
   s.draconicHistory = s.draconicHistory or {}
+  s.ae2Prev = s.ae2Prev or {}
   local screen = lib.ui.target(lib.devices.spec(name))
   lib.ui.boot(screen, lib.devices.spec(name).label or name)
   mccrDrawConsoleStatus(name, "running")
@@ -762,6 +895,14 @@ local function run(name, lib)
           }
           while #history > 48 do table.remove(history, 1) end
           found[pname].history = history
+        elseif kind == "ae2_network" then
+          found[pname] = normalizeAe2(pname, ptype, attrs, s.ae2Prev[pname], now, obj)
+          s.ae2Prev[pname] = {
+            itemCount = found[pname].itemCount,
+            itemStorageUsed = found[pname].itemStorageUsed,
+            fluidAmount = found[pname].fluidAmount,
+            time = now,
+          }
         else
           found[pname] = {
           name = pname,

@@ -1263,14 +1263,16 @@ local function ae2Devices(snap)
   local devices = {}
   for source, bundle in pairs((snap or {}).peripherals or {}) do
     for pname, item in pairs(bundle or {}) do
-      local label = tostring(pname or "")
-      local hay = string.lower(label .. " " .. tostring((item or {}).kind or "") .. " " .. tostring((item or {}).type or ""))
-      if type(item) == "table" and (item.kind == "ae2_network" or hay:find("ae2") or hay:find("applied") or hay:find("mebridge")) then
-        local copy = {}
-        for k, v in pairs(item) do copy[k] = v end
-        copy.source = source
-        copy.name = copy.name or pname
-        devices[#devices + 1] = copy
+      if type(item) == "table" then
+        local label = tostring(pname or "")
+        local hay = string.lower(label .. " " .. tostring(item.kind or "") .. " " .. tostring(item.type or ""))
+        if item.kind == "ae2_network" or hay:find("ae2") or hay:find("applied") or hay:find("mebridge") then
+          local copy = {}
+          for k, v in pairs(item) do copy[k] = v end
+          copy.source = source
+          copy.name = copy.name or pname
+          devices[#devices + 1] = copy
+        end
       end
     end
   end
@@ -1307,6 +1309,37 @@ end
 
 local function ae2Summary(snap)
   local devices = ae2Devices(snap)
+  if type((snap or {}).ae2) == "table" then
+    local ae = (snap or {}).ae2
+    return {
+      devices = ae.devices or devices,
+      online = ae.online == true or #(ae.devices or devices) > 0,
+      used = ae.itemStorageUsed,
+      capacity = ae.itemStorageTotal,
+      percent = ae.itemStoragePercent or ae.energyPercent or 0,
+      itemCount = ae.itemCount,
+      input = ae.itemInputPerTick or 0,
+      output = ae.itemOutputPerTick or 0,
+      net = ae.itemNetPerTick or 0,
+      powerUsage = ae.energyUsage,
+      powerCapacity = ae.energyCapacity,
+      powerStored = ae.energyStored,
+      channels = ae.usedChannels,
+      p2p = ae.p2p,
+      jobs = ae.craftingCpuBusy,
+      cpus = ae.craftingCpuCount,
+      busyCpus = ae.craftingCpuBusy,
+      fluids = ae.fluidTypes,
+      fluidAmount = ae.fluidAmount,
+      tanks = ae.fluidCellCount,
+      itemTypes = ae.itemTypes,
+      cells = ae.cellCount,
+      craftableItems = ae.craftableItems,
+      craftableFluids = ae.craftableFluids,
+      eta = ae.itemEta,
+      etaMode = ae.itemEtaMode,
+    }
+  end
   local used = 0
   local capacity = 0
   local inRate = nil
@@ -1440,7 +1473,7 @@ local function drawAppliedTopology(t, lib, x, y, w, h, summary)
   drawFrameBox(t, lib, x, y, w, h, colors.gray)
   lib.ui.center(t, y + 1, "NETWORK TOPOLOGY", colors.cyan)
   local labels = {
-    { "DRIVES", tostring(#(summary.devices or {})), colors.cyan },
+    { "DRIVES", tostring(summary.cells or #(summary.devices or {})), colors.cyan },
     { "INTERFACES", tostring(math.max(0, #(summary.devices or {}) - 1)), colors.lightBlue },
     { "CHANNELS", tostring(summary.channels or "--"), colors.purple },
     { "P2P LINKS", tostring(summary.p2p or "--"), colors.purple },
@@ -1490,7 +1523,8 @@ local function drawAppliedPresentation(t, lib, snap)
   lib.ui.center(t, titleY, "APPLIED", colors.white)
   drawAppliedPanel(t, lib, leftX, p1, sideW, topH, "storage", colors.cyan, {
     { label = string.format("%0.1f%%", pct), value = "", color = colors.white },
-    { label = fmtAeCount(sAe.used), value = "/ " .. fmtAeCount(sAe.capacity) .. " ITEMS", color = colors.gray },
+    { label = "ITEMS", value = fmtAeCount(sAe.itemCount), color = colors.gray },
+    { label = "BYTES", value = fmtAeCount(sAe.used) .. " / " .. fmtAeCount(sAe.capacity), color = colors.gray },
     { sep = true },
     { label = "IN", value = fmtAeCount(sAe.input) .. "/t", color = colors.green },
     { label = "OUT", value = "-" .. fmtAeCount(sAe.output) .. "/t", color = colors.lightBlue },
@@ -1524,19 +1558,19 @@ local function drawAppliedPresentation(t, lib, snap)
   }, nil)
   drawAppliedPanel(t, lib, rightX, r2, sideW, rightH, "crafting", colors.purple, {
     { label = "JOBS", value = tostring(sAe.jobs or "--"), color = colors.gray },
-    { label = "CPU BUSY", value = tostring(sAe.cpus or "--"), color = colors.gray },
+    { label = "CPU BUSY", value = tostring(sAe.busyCpus or "--") .. " / " .. tostring(sAe.cpus or "--"), color = colors.gray },
     { sep = true },
-    { label = "QUEUE", value = "--", color = colors.gray },
+    { label = "CRAFTABLE", value = tostring(sAe.craftableItems or "--"), color = colors.gray },
     { label = "STORAGE", value = pct > 0 and string.format("%0.0f%%", pct) or "--", color = colors.gray },
   }, nil)
   drawAppliedPanel(t, lib, rightX, r3, sideW, rightH, "fluids", colors.cyan, {
     { label = "TANKS", value = tostring(sAe.tanks or "--"), color = colors.gray },
     { label = "FLUIDS", value = tostring(sAe.fluids or "--"), color = colors.gray },
     { sep = true },
-    { label = "STORED", value = "-- mB", color = colors.gray },
+    { label = "STORED", value = fmtAeCount(sAe.fluidAmount) .. " mB", color = colors.gray },
   }, nil)
   drawAppliedPanel(t, lib, rightX, r4, sideW, r4H, "time to full", colors.yellow, {
-    { label = "ETA", value = sAe.net > 0 and "--" or "stable", color = colors.white },
+    { label = "ETA", value = tostring(sAe.eta or sAe.etaMode or "stable"), color = colors.white },
   }, nil)
 end
 
