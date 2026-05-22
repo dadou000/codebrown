@@ -1053,7 +1053,7 @@ end
 
 local function drawCoreInfoPanel(t, lib, x, y, w, h, title, color, rows, pct)
   if w < 12 or h < 4 then return end
-  drawFrameBox(t, lib, x, y, w, h, colors.white)
+  drawFrameBox(t, lib, x, y, w, h, colors.gray)
   writeClip(t, lib, x + 2, y + 1, string.upper(tostring(title or "")), color or colors.white)
   local yy = y + 2
   if pct ~= nil and yy < y + h - 1 then
@@ -1180,8 +1180,8 @@ local function drawDraconicPresentation(t, lib, snap)
   local maxFlow = math.max(math.abs(inFlow), math.abs(outFlow), math.abs(net))
   local flowPct = math.min(100, math.abs(net) / math.max(1, math.abs(inFlow) + math.abs(outFlow)) * 100)
 
-  drawFrameBox(t, lib, 1, 1, w, h, colors.white)
-  drawFrameBox(t, lib, 2, 1, w - 2, 3, colors.white)
+  drawFrameBox(t, lib, 1, 1, w, h, colors.gray)
+  drawFrameBox(t, lib, 2, 1, w - 2, 3, colors.gray)
   local titleA = "DRACONIC ENERGY "
   local titleB = "CORE"
   local titleX = math.max(2, math.floor((w - (#titleA + #titleB)) / 2) + 1)
