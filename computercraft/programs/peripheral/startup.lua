@@ -594,7 +594,7 @@ local function classify(name, ptype, methods)
   if hay:find("resistive") or hay:find("heater") then return "mekanism_resistive_heater" end
   if hay:find("speaker") then return "speaker" end
   if hay:find("mekanism") then return "mekanism_device" end
-  if hay:find("ae2") or hay:find("applied") or hay:find("mebridge") or hay:find("crafting") then return "ae2_network" end
+  if hay:find("ae2") or hay:find("applied") or hay:find("mebridge") or hay:find("me_bridge") or hay:find("me bridge") or hay:find("crafting") then return "ae2_network" end
   if hay:find("monitor") then return "monitor" end
   if hay:find("redstone") then return "redstone_io" end
   return "unknown"
@@ -854,6 +854,26 @@ local function normalizeAe2(pname, ptype, attrs, previous, now, obj)
   }
 end
 
+local function compactNumber(value, suffix)
+  value = tonumber(value)
+  if not value then return "--" .. (suffix or "") end
+  local units = { "", "k", "M", "G", "T" }
+  local n, unit = math.abs(value), 1
+  while n >= 1000 and unit < #units do n = n / 1000; unit = unit + 1 end
+  local scaled = value / (1000 ^ (unit - 1))
+  local text = unit == 1 and string.format("%0.0f", scaled) or string.format("%0.1f%s", scaled, units[unit])
+  return text .. (suffix or "")
+end
+
+local function firstAe2Device(discovered)
+  for pname, item in pairs(discovered or {}) do
+    if type(item) == "table" and item.kind == "ae2_network" then
+      return pname, item
+    end
+  end
+  return nil, nil
+end
+
 local function callMethod(obj, method, ...)
   if not obj or type(obj[method]) ~= "function" then return false end
   local ok = pcall(obj[method], ...)
@@ -962,6 +982,30 @@ local function run(name, lib)
     lib.ui.center(screen, 1, string.upper(name), colors.lightBlue)
     lib.ui.writeAt(screen, 1, 3, "Power: " .. eval.status .. " " .. string.format("%0.1fV %0.2fA", eval.voltage, eval.amps), lib.ui.statusColor(eval.severity))
     local y = 4
+    local aeName, ae = firstAe2Device(s.discovered)
+    if ae then
+      local pct = tonumber(ae.itemStoragePercent or ae.energyPercent) or 0
+      lib.ui.writeAt(screen, 1, y, "AE2: " .. tostring(aeName), colors.cyan)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, string.format("Storage %0.1f%%", pct), colors.white)
+      y = y + 1
+      lib.ui.bar(screen, 1, y, select(1, lib.ui.size(screen)), pct, 100, colors.cyan)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, "Items " .. compactNumber(ae.itemCount) .. " types " .. tostring(ae.itemTypes or 0), colors.green)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, "Bytes " .. compactNumber(ae.itemStorageUsed) .. "/" .. compactNumber(ae.itemStorageTotal), colors.gray)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, "Flow " .. compactNumber(ae.itemNetPerTick, "/t"), colors.purple)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, "Energy " .. compactNumber(ae.energyStored) .. "/" .. compactNumber(ae.energyCapacity) .. " AE", colors.yellow)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, "Usage " .. compactNumber(ae.energyUsage, " AE/t"), colors.yellow)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, "CPU " .. tostring(ae.craftingCpuBusy or 0) .. "/" .. tostring(ae.craftingCpuCount or 0) .. " cells " .. tostring(ae.cellCount or 0), colors.purple)
+      y = y + 1
+      lib.ui.writeAt(screen, 1, y, "Fluids " .. tostring(ae.fluidTypes or 0) .. " " .. compactNumber(ae.fluidAmount, " mB"), colors.lightBlue)
+      return
+    end
     if name == "peripheral5_fake_load" then
       lib.ui.writeAt(screen, 1, y, string.format("Load signal: %0.2f MW", (eval.loadWatts or 0) / 1000000), colors.yellow)
       y = y + 1

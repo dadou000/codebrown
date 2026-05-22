@@ -1266,7 +1266,7 @@ local function ae2Devices(snap)
       if type(item) == "table" then
         local label = tostring(pname or "")
         local hay = string.lower(label .. " " .. tostring(item.kind or "") .. " " .. tostring(item.type or ""))
-        if item.kind == "ae2_network" or hay:find("ae2") or hay:find("applied") or hay:find("mebridge") then
+        if item.kind == "ae2_network" or hay:find("ae2") or hay:find("applied") or hay:find("mebridge") or hay:find("me_bridge") or hay:find("me bridge") then
           local copy = {}
           for k, v in pairs(item) do copy[k] = v end
           copy.source = source

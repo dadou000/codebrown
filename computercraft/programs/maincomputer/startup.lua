@@ -1056,6 +1056,8 @@ local function run(name, lib)
       }
     elseif pkt.kind == "peripherals" then
       s.peripherals[pkt.source or tostring(pkt.id)] = pkt.payload or {}
+      s.draconic = draconicSnapshot(s.peripherals)
+      s.ae2 = ae2Snapshot(s.peripherals)
     elseif pkt.kind == "command" then
       applyCommand(pkt)
     end
