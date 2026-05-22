@@ -1146,65 +1146,18 @@ local function setUpdateStatus(s, status)
   end
 end
 
-local function updateStageColor(stage)
-  if stage == "done" or stage == "rebooting" then return colors.green end
-  if stage == "failed" or stage == "timeout" then return colors.red end
-  if stage == "downloading" or stage == "verifying" or stage == "bootloader" or stage == "starting" then return colors.yellow end
-  return colors.lightBlue
-end
-
-local function drawUpdateStatus(t, lib, s)
-  local w, h = lib.ui.size(t)
-  lib.ui.clear(t, colors.white, colors.black)
-  local rows = {}
-  local sum, done, failed = 0, 0, 0
-  for key, item in pairs(s.updateStatus or {}) do
-    item.key = key
-    rows[#rows + 1] = item
-    local p = tonumber(item.progress) or 0
-    if item.stage == "done" or item.stage == "rebooting" then p = 100; done = done + 1 end
-    if item.stage == "failed" or item.stage == "timeout" then p = 100; failed = failed + 1 end
-    sum = sum + math.max(0, math.min(100, p))
-  end
-  table.sort(rows, function(a, b)
-    local as, bs = tonumber(a.slot) or 999, tonumber(b.slot) or 999
-    if as == bs then return tostring(a.key) < tostring(b.key) end
-    return as < bs
-  end)
-  local total = math.max(1, #rows)
-  local pct = math.floor(sum / total)
-  local kind = rows[1] and tostring(rows[1].updateKind or rows[1].kind or "update") or "update"
-  lib.ui.center(t, 1, string.upper(kind) .. " UPDATE", colors.lightBlue)
-  lib.ui.writeAt(t, 1, 2, string.format("%d%%  done %d  fail %d  nodes %d", pct, done, failed, #rows), failed > 0 and colors.red or colors.yellow)
-  lib.ui.bar(t, 1, 3, math.max(8, w - 1), pct, 100, failed > 0 and colors.red or colors.green)
-  local y = 5
-  for _, item in ipairs(rows) do
-    if y > h then break end
-    local slot = item.slot and (tostring(item.slot) .. "/" .. tostring(item.total or "?") .. " ") or ""
-    local text = slot .. tostring(item.device or item.key) .. " " .. tostring(item.stage or "queued")
-    if item.version or item.currentVersion then text = text .. " v" .. tostring(item.version or item.currentVersion) end
-    local eta = tonumber(item.eta)
-    if eta and eta > 0 then text = text .. " T-" .. tostring(math.ceil(eta)) .. "s" end
-    if item.detail then text = text .. " " .. tostring(item.detail) end
-    lib.ui.writeAt(t, 1, y, text, updateStageColor(item.stage))
-    if item.progress then
-      local pctRow = math.max(0, math.min(100, tonumber(item.progress) or 0))
-      lib.ui.bar(t, math.max(1, math.floor(w * 0.68)), y, math.max(4, math.floor(w * 0.30)), pctRow, 100, updateStageColor(item.stage))
-    end
-    y = y + 1
-  end
-  if #rows == 0 then lib.ui.writeAt(t, 1, 5, "Waiting for scheduled update status", colors.gray) end
-end
-
 local function drawUpdateBanner(t, lib, s)
   if not (s.updateUntil and os.clock() < s.updateUntil) then return end
   if not updateHasRows(s.updateStatus) then return end
   local w, h = lib.ui.size(t)
-  if h < 4 then return end
+  if h < 1 then return end
+  local rows = {}
   local sum, done, failed, nodes = 0, 0, 0, 0
   local kind = "update"
-  for _, item in pairs(s.updateStatus or {}) do
+  for key, item in pairs(s.updateStatus or {}) do
     if type(item) == "table" then
+      item.key = key
+      rows[#rows + 1] = item
       nodes = nodes + 1
       kind = tostring(item.updateKind or item.kind or kind)
       local p = tonumber(item.progress) or 0
@@ -1214,14 +1167,33 @@ local function drawUpdateBanner(t, lib, s)
     end
   end
   if nodes <= 0 then return end
+  table.sort(rows, function(a, b)
+    local as, bs = tonumber(a.slot) or 999, tonumber(b.slot) or 999
+    if as == bs then return tostring(a.device or a.key) < tostring(b.device or b.key) end
+    return as < bs
+  end)
+  local current = nil
+  for _, item in ipairs(rows) do
+    local stage = tostring(item.stage or "queued")
+    if stage ~= "done" and stage ~= "rebooting" and stage ~= "failed" and stage ~= "timeout" then
+      current = item
+      if stage ~= "queued" and stage ~= "scheduled" and stage ~= "countdown" then break end
+    end
+  end
+  current = current or rows[#rows]
   local pct = math.floor(sum / nodes)
-  local text = string.format(" %s UPDATE %d%%  done %d/%d  fail %d", string.upper(kind), pct, done, nodes, failed)
-  local color = failed > 0 and colors.red or colors.yellow
-  lib.ui.writeAt(t, 1, h, string.rep(" ", w), colors.white, colors.gray)
-  lib.ui.writeAt(t, 1, h, text:sub(1, math.max(1, w - 10)), color, colors.gray)
-  lib.ui.bar(t, math.max(1, w - 8), h, math.min(8, w), pct, 100, failed > 0 and colors.red or colors.green)
+  local upperKind = string.upper(kind == "program" and "firmware" or kind)
+  local bg = kind == "bootloader" and colors.blue or colors.green
+  if failed > 0 then bg = colors.red end
+  local fg = bg == colors.green and colors.black or colors.white
+  local device = current and tostring(current.device or current.key or "waiting") or "waiting"
+  local stage = current and tostring(current.stage or "queued") or "queued"
+  local eta = current and tonumber(current.eta) or nil
+  local etaText = eta and eta > 0 and (" T-" .. tostring(math.ceil(eta)) .. "s") or ""
+  local text = string.format(" %s %d%%  %s %s%s  done %d/%d  fail %d", upperKind, pct, device, stage, etaText, done, nodes, failed)
+  lib.ui.writeAt(t, 1, h, string.rep(" ", w), fg, bg)
+  lib.ui.writeAt(t, 1, h, text:sub(1, w), fg, bg)
 end
-
 local function drawVersions(t, lib, snap, name)
   local w, h = lib.ui.size(t)
   lib.ui.clear(t, colors.white, colors.black)
@@ -1282,14 +1254,9 @@ local function run(name, lib)
     s.eval = eval
 
     styledClear(screen, lib, s.snapshot)
-    local w, h = lib.ui.size(screen)
-    local largeEnough = w >= 60 and h >= 12
-    local mode = displayMode(s.snapshot, name, "overview")
     local presentationFeedOff = (s.snapshot.breakers or {}).main_computer == false and tostring(spec.display or ""):find("^presentation")
     if s.showVersionsUntil and os.clock() < s.showVersionsUntil then
       drawVersions(screen, lib, s.snapshot, name)
-    elseif mode == "updates" and largeEnough and s.updateUntil and os.clock() < s.updateUntil then
-      drawUpdateStatus(screen, lib, s)
     elseif presentationFeedOff then
       s.sleepTick = (s.sleepTick or 0) + 1
       if s.sleepTick == 1 then
@@ -1312,7 +1279,7 @@ local function run(name, lib)
     elseif spec.display == "stats" then s.sleepTick = 0; drawStats(screen, lib, s.snapshot, name)
     elseif spec.display == "monitor" then s.sleepTick = 0; drawMonitor(screen, lib, s.snapshot, name, s.graphMode)
     else s.sleepTick = 0; drawPresentation(screen, lib, s.snapshot, name) end
-    if mode ~= "updates" or not largeEnough then drawUpdateBanner(screen, lib, s) end
+    drawUpdateBanner(screen, lib, s)
   end
 
   local function publishTelemetry()
